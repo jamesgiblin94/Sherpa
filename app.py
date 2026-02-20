@@ -26,6 +26,7 @@ ANTHROPIC_API_KEY       = _secret("ANTHROPIC_API_KEY",       "")
 SKYSCANNER_AFFILIATE_ID = _secret("SKYSCANNER_AFFILIATE_ID", "")
 GOOGLE_MAPS_API_KEY     = _secret("GOOGLE_MAPS_API_KEY",     "")
 BOOKING_AFFILIATE_ID    = _secret("BOOKING_AFFILIATE_ID",    "")
+GYG_PARTNER_ID          = _secret("GYG_PARTNER_ID",          "")
 
 # ============================================================
 # PAGE SETUP
@@ -620,6 +621,8 @@ defaults = {
     "book_results":       None,
     "support_results":    None,
     "chat_history":       [],
+    "itin_feedback":      "",    # user tweak request for itinerary
+    "gyg_activities":     None,  # bookable activities extracted from itinerary
     "on_trip_loc":        None,   # {"lat": x, "lng": y, "address": "..."}
     "on_trip_nearby":     None,   # cached nearby suggestions
     "on_trip_history":    None,   # cached historical context
@@ -1712,6 +1715,27 @@ elif st.session_state.active_tab == "Book":
             }
             return base + "?" + urllib.parse.urlencode(params)
 
+        # ── Explore all hotels — big button at top ───────────
+        _all_hotels_url = booking_search_url(dest_city, h_checkin_s, h_checkout_s,
+                                             h_adults, h_rooms, bk_aid)
+        _h_date_range = ""
+        if hasattr(h_checkin, "strftime") and hasattr(h_checkout, "strftime"):
+            _h_date_range = f" · {h_checkin.strftime('%d %b')} – {h_checkout.strftime('%d %b')}"
+        st.markdown(
+            f'<a href="{_all_hotels_url}" target="_blank" style="' +
+            f'display:block;text-align:center;background:#003580;color:#fff;' +
+            f'padding:18px 24px;border-radius:12px;font-weight:700;font-size:1.1rem;' +
+            f'text-decoration:none;letter-spacing:0.3px;margin:16px 0 20px;' +
+            f'box-shadow:0 4px 20px rgba(0,53,128,0.4);border:1px solid rgba(255,255,255,0.12)">' +
+            f'🏨 Explore all hotels in {dest_city} on Booking.com{_h_date_range} →</a>',
+            unsafe_allow_html=True
+        )
+        st.markdown(
+            '<div style="font-size:0.78rem;color:#5f7080;text-align:center;margin:-12px 0 16px">' +
+            f'Showing {h_adults} guest{"s" if h_adults > 1 else ""} · {h_rooms} room{"s" if h_rooms > 1 else ""} · live prices & availability</div>',
+            unsafe_allow_html=True
+        )
+
         # Generate hotel recommendations (auto-runs, cached in session state)
         if st.session_state.get("hotel_results") is None:
             with st.spinner("Finding the best places to stay..."):
@@ -1807,10 +1831,6 @@ Rules:
     <a href="{h_url}" target="_blank" class="hotel-book-btn">Check availability on Booking.com →</a>
 </div>
 """, unsafe_allow_html=True)
-
-            if st.button("🔄 Refresh hotel suggestions", key="refresh_hotels"):
-                st.session_state.hotel_results = None
-                st.rerun()
 
             st.caption(
                 "💡 Prices are estimates — click through for live rates. "
@@ -2035,9 +2055,11 @@ FORMATTING RULES — follow exactly:
 
 ## 🗓️ Your Itinerary
 {day_sections}
+
 ## 💰 Cost Guide
+Provide realistic cost estimates in this exact format (one item per line, starting with -):
 - Flights: £X–£X return pp
-- Food & drink: approx £X–£X per day
+- Food & drink: £X–£X per day
 - Activities: £X–£X total
 - Local transport: £X–£X
 - **Estimated total (exc. accommodation): £X–£X per person**
@@ -2153,19 +2175,21 @@ FORMATTING RULES — follow exactly:
 
                 # ── Cost guide ───────────────────────────────────
                 elif "Cost" in _heading or "cost" in _heading.lower():
-                    _cost_lines = [l.strip() for l in _body.split("\n") if l.strip().startswith("-")]
                     _rows_html = ""
-                    for _cl in _cost_lines:
-                        _cl = _cl.lstrip("- ").strip()
-                        _bold = _re.match(r"\*\*(.+?)\*\*", _cl)
+                    # Accept lines starting with - OR containing : (colon-separated)
+                    for _cl in _body.split("\n"):
+                        _cl = _cl.strip()
+                        if not _cl:
+                            continue
+                        _cl_clean = _cl.lstrip("-• ").strip()
+                        _bold = _re.match(r"\*\*(.+?)\*\*", _cl_clean)
                         if _bold:
                             _rows_html += f'<div class="cost-row cost-total"><span>{_bold.group(1)}</span></div>'
-                        else:
-                            _parts2 = _cl.split(":", 1)
-                            if len(_parts2) == 2:
-                                _rows_html += f'<div class="cost-row"><span>{_parts2[0].strip()}</span><span>{_parts2[1].strip()}</span></div>'
-                            else:
-                                _rows_html += f'<div class="cost-row"><span>{_cl}</span></div>'
+                        elif ":" in _cl_clean:
+                            _parts2 = _cl_clean.split(":", 1)
+                            _rows_html += f'<div class="cost-row"><span>{_parts2[0].strip()}</span><span>{_parts2[1].strip()}</span></div>'
+                        elif _cl_clean:
+                            _rows_html += f'<div class="cost-row"><span>{_cl_clean}</span></div>'
                     if _rows_html:
                         st.markdown(
                             f'<div class="itinerary-meta"><h4>💰 Cost Guide</h4>{_rows_html}</div>',
@@ -2190,6 +2214,167 @@ FORMATTING RULES — follow exactly:
                 # ── Everything else — plain markdown ─────────────
                 else:
                     st.markdown(_sec)
+
+
+            # ── Bookable activities from itinerary ───────────────
+            if st.session_state.get("gyg_activities") is None:
+                with st.spinner("🎟️ Finding things to book..."):
+                    try:
+                        import json as _gj, re as _gre
+                        _gyg_prompt = (
+                            f"From this travel itinerary for {dest}, extract every specific activity, "
+                            "attraction, tour, museum, or experience that the traveller should consider "
+                            "pre-booking or buying tickets for in advance.\n\n"
+                            f"ITINERARY:\n{st.session_state.book_results}\n\n"
+                            "For each bookable item return:\n"
+                            "- name: the exact activity/attraction name\n"
+                            "- type: one of: Tour, Museum, Experience, Skip-the-line, Day trip, Show, Class\n"
+                            "- why_book: one short sentence on why booking ahead matters (e.g. sells out, long queues)\n"
+                            "- search: a short 2-4 word GetYourGuide search term to find it\n\n"
+                            "Only include things genuinely worth pre-booking — skip restaurants and generic walks.\n"
+                            "Return ONLY a valid JSON array, max 6 items:\n"
+                            '[{"name":"Sagrada Familia","type":"Skip-the-line","why_book":"Sells out weeks ahead","search":"Sagrada Familia tickets"}]'
+                        )
+                        _gr = claude_client.messages.create(
+                            model="claude-sonnet-4-6",
+                            max_tokens=800,
+                            messages=[{"role": "user", "content": _gyg_prompt}]
+                        )
+                        _graw   = _gr.content[0].text.strip()
+                        _gmatch = _gre.search(r"\[.*\]", _graw, _gre.DOTALL)
+                        if _gmatch:
+                            st.session_state["gyg_activities"] = _gj.loads(_gmatch.group())
+                        else:
+                            st.session_state["gyg_activities"] = []
+                    except Exception:
+                        st.session_state["gyg_activities"] = []
+
+            _gyg_acts = st.session_state.get("gyg_activities") or []
+            if _gyg_acts:
+                import urllib.parse as _gup
+                _gyg_partner = GYG_PARTNER_ID or ""
+                _type_icons_gyg = {
+                    "Tour": "🗺️", "Museum": "🏛️", "Experience": "✨",
+                    "Skip-the-line": "⚡", "Day trip": "🚌", "Show": "🎭", "Class": "🎨",
+                }
+
+                st.markdown("---")
+                st.markdown(
+                    '<div style="font-size:0.7rem;color:#5f7080;letter-spacing:2px;'
+                    'text-transform:uppercase;margin-bottom:4px">🎟️ Book in advance</div>',
+                    unsafe_allow_html=True
+                )
+                st.markdown(
+                    '<div style="font-size:0.82rem;color:#8a9bb0;margin-bottom:14px">'
+                    'These experiences from your itinerary are worth securing early — '
+                    'they sell out or have long queues without a booking.</div>',
+                    unsafe_allow_html=True
+                )
+
+                # Render in pairs
+                for _gi in range(0, len(_gyg_acts), 2):
+                    _gcols = st.columns(2)
+                    for _gci, _ga in enumerate(_gyg_acts[_gi:_gi+2]):
+                        with _gcols[_gci]:
+                            _ga_name   = _ga.get("name", "")
+                            _ga_type   = _ga.get("type", "Experience")
+                            _ga_why    = _ga.get("why_book", "")
+                            _ga_search = _ga.get("search", _ga_name)
+                            _ga_icon   = _type_icons_gyg.get(_ga_type, "🎟️")
+
+                            # Build GYG search URL with affiliate ID
+                            _gyg_q     = _gup.quote_plus(_ga_search)
+                            if _gyg_partner:
+                                _gyg_url = f"https://www.getyourguide.com/s/?q={_gyg_q}&partner_id={_gyg_partner}"
+                            else:
+                                _gyg_url = f"https://www.getyourguide.com/s/?q={_gyg_q}"
+
+                            st.markdown(
+                                f'<a href="{_gyg_url}" target="_blank" style="text-decoration:none;display:block">' +
+                                f'<div style="background:rgba(15,25,35,0.5);border:1px solid rgba(201,168,76,0.2);' +
+                                f'border-radius:10px;padding:14px 16px;margin-bottom:10px;' +
+                                f'transition:border-color 0.2s;cursor:pointer">' +
+                                f'<div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">' +
+                                f'<span style="font-size:16px">{_ga_icon}</span>' +
+                                f'<span style="font-size:0.88rem;font-weight:700;color:#e8e0d5">{_ga_name}</span>' +
+                                f'</div>' +
+                                f'<div style="font-size:10px;color:#c9a84c;text-transform:uppercase;' +
+                                f'letter-spacing:1px;margin-bottom:5px">{_ga_type}</div>' +
+                                f'<div style="font-size:0.78rem;color:#8a9bb0;margin-bottom:10px">{_ga_why}</div>' +
+                                f'<div style="background:#c9a84c;color:#0c1118;font-size:11px;' +
+                                f'font-weight:700;padding:5px 12px;border-radius:5px;display:inline-block;' +
+                                f'letter-spacing:0.5px">Book on GetYourGuide →</div>' +
+                                f'</div></a>',
+                                unsafe_allow_html=True
+                            )
+
+                if not _gyg_partner:
+                    st.markdown(
+                        '<div style="font-size:0.72rem;color:#4a5568;margin-top:4px">'
+                        '💡 Add your <code>GYG_PARTNER_ID</code> to .env to earn 8% commission on bookings</div>',
+                        unsafe_allow_html=True
+                    )
+
+            # ── Itinerary tweak box ───────────────────────────────
+            st.markdown("---")
+            st.markdown(
+                '<div style="font-size:0.7rem;color:#5f7080;letter-spacing:2px;'
+                'text-transform:uppercase;margin-bottom:10px">✏️ Tweak your itinerary</div>',
+                unsafe_allow_html=True
+            )
+            _tweak_col1, _tweak_col2 = st.columns([5, 1])
+            with _tweak_col1:
+                _tweak_input = st.text_area(
+                    label="tweak",
+                    label_visibility="collapsed",
+                    placeholder="e.g. swap dinner on day 2 for somewhere more casual, add a morning market visit, fewer museums and more food experiences...",
+                    value=st.session_state.get("itin_feedback", ""),
+                    height=90,
+                    key="itin_tweak_area",
+                )
+            with _tweak_col2:
+                st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+                _regen = st.button("↺ Regenerate", use_container_width=True, key="regen_itin")
+                _reset = st.button("🔄 Start fresh", use_container_width=True, key="reset_itin")
+
+            if _reset:
+                st.session_state.book_results   = None
+                st.session_state.map_locations  = None
+                st.session_state.itin_feedback  = ""
+                st.rerun()
+
+            if _regen:
+                _feedback = _tweak_input.strip()
+                if _feedback:
+                    st.session_state["itin_feedback"] = _feedback
+                    with st.spinner("✏️ Reworking your itinerary..."):
+                        try:
+                            _tweak_prompt = (
+                                f"Here is a travel itinerary for {dest}:\n\n"
+                                f"{st.session_state.book_results}\n\n"
+                                f"The traveller has asked for the following changes:\n"
+                                f"{_feedback}\n\n"
+                                "Please rewrite the full itinerary incorporating these changes. "
+                                "Keep everything that works well and only change what has been asked. "
+                                "Return the full itinerary in exactly the same format as before — "
+                                "same ## headings, same structure, same Cost Guide and Local Tips sections."
+                            )
+                            _tweak_msg = claude_client.messages.create(
+                                model="claude-sonnet-4-6",
+                                max_tokens=4000,
+                                messages=[{"role": "user", "content": _tweak_prompt}]
+                            )
+                            st.session_state.book_results  = _tweak_msg.content[0].text
+                            st.session_state.map_locations = None  # re-extract pins from new itinerary
+                            st.session_state.gyg_activities = None  # re-extract bookable activities
+                        except Exception as _te:
+                            st.error(f"Could not regenerate: {_te}")
+                    st.rerun()
+                else:
+                    # No feedback — just regenerate from scratch with same inputs
+                    st.session_state.book_results  = None
+                    st.session_state.map_locations = None
+                    st.rerun()
 
 
             # ── Interactive Map + Google Maps Export ─────────────
@@ -2435,7 +2620,7 @@ L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}
 
             _rc1, _rc2 = st.columns([1, 4])
             with _rc1:
-                if st.button("🔄 Refresh map"):
+                if st.button("🗺️ Generate map"):
                     st.session_state.map_locations = None
                     st.rerun()
 
