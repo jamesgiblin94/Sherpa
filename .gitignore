@@ -1,7 +1,33 @@
+# Environment variables - NEVER commit!
 .env
-__pycache__/
-*.pyc
-venv/
-*.txt
+*.env
+.env.local
+.env.*.local
+
+# Sensitive files
 API Code.txt
 Sherpa.txt
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.venv/
+ENV/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

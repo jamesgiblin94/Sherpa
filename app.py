@@ -626,6 +626,8 @@ defaults = {
     "map_locations":      None,
     "hotel_results":      None,
     "car_hire_rating":    None,  # list of AI-recommended hotel dicts
+    "car_hire_confirmed": False, # whether user has confirmed car hire booked
+    "dest_preference":    "",    # optional destination hint (city/country/region)
     "selected_hotel":     None,  # name of chosen accommodation
     "travel_dates":       {},    # {mode, specific_depart, specific_return, month}
     "transport_mode":     "🚗 I'm flexible — willing to rent a car",
@@ -839,6 +841,17 @@ if st.session_state.active_tab == "Inspire":
                 value=saved.get("priorities","")
             )
 
+    # ── Optional destination preference ──────────────────────────
+    _dest_pref_cols = st.columns([1, 2, 1])
+    with _dest_pref_cols[1]:
+        _dest_pref = st.text_input(
+            "🗺️ Have a destination in mind? *(optional)*",
+            placeholder="e.g. Portugal, Andalusia, Barcelona — leave blank for surprise suggestions",
+            value=st.session_state.get("dest_preference", ""),
+            help="Enter a city for one focused suggestion, a region or country for up to three options within that area."
+        )
+        st.session_state["dest_preference"] = _dest_pref
+
     # Always save current preferences to session state
     st.session_state.user_profile = {
         "starting_point":  starting_point,
@@ -855,19 +868,50 @@ if st.session_state.active_tab == "Inspire":
         st.session_state.user_profile["specific_return"] = st.session_state["travel_dates"].get("specific_return")
 
     # ── Validate ───────────────────────────────────────────────
+    _dest_pref_entered = bool(st.session_state.get("dest_preference", "").strip())
     if not starting_point:
         st.info("👆 Open **Your Travel Preferences** above, fill in your details, then hit Inspire Me!")
-    elif not trip_type:
-        st.warning("Please select at least one trip type in the preferences panel.")
+    elif not trip_type and not _dest_pref_entered:
+        st.warning("Please select at least one trip type, or enter a destination above.")
     else:
         if st.button("✨ Inspire Me!", use_container_width=False):
             with st.spinner("Sherpa is searching the globe for your perfect destinations..."):
                 try:
-                    trip_type_text  = " / ".join(trip_type)
+                    trip_type_text  = " / ".join(trip_type) if trip_type else "Any — match the destination"
                     priorities_text = user_priorities or "no specific preferences given"
 
+                    _dest_pref_val = st.session_state.get("dest_preference", "").strip()
+
+                    # Work out how many destinations to suggest and the focus instruction
+                    if _dest_pref_val:
+                        _dest_lower = _dest_pref_val.lower()
+                        # Heuristic: if it looks like a single city (no comma, short, known pattern)
+                        # we suggest 1; if country/region, up to 3
+                        _single_city_hints = ["city","town","ville","burg","berg","grad","port","pool","ford","wich","ham","ley","wick"]
+                        _is_likely_city = (
+                            len(_dest_pref_val.split()) <= 2
+                            and "," not in _dest_pref_val
+                            and any(h in _dest_lower for h in _single_city_hints)
+                        ) or (
+                            # Short single-word place — likely a city not a country
+                            len(_dest_pref_val.split()) == 1
+                            and len(_dest_pref_val) <= 12
+                            and _dest_pref_val[0].isupper()
+                        )
+                        if _is_likely_city:
+                            _n_dest     = 1
+                            _dest_instr = f"The traveller specifically wants to visit {_dest_pref_val}. Return EXACTLY 1 destination — {_dest_pref_val} only. Do not suggest alternatives."
+                        else:
+                            _n_dest     = 3
+                            _dest_instr = f"The traveller is interested in {_dest_pref_val}. Suggest up to 3 destinations WITHIN or directly related to {_dest_pref_val} — do not go outside this area. Choose the most distinct and interesting options within {_dest_pref_val} that match their profile."
+                    else:
+                        _n_dest     = 3
+                        _dest_instr = "Suggest 3 destinations from anywhere in the world that best match the traveller's profile."
+
                     prompt = f"""
-You are Sherpa, an expert international travel guide. You MUST suggest EXACTLY 3 weekend destination options — no more, no fewer. Returning fewer than 3 is not acceptable.
+You are Sherpa, an expert international travel guide. You MUST suggest EXACTLY {_n_dest} weekend destination option{"s" if _n_dest > 1 else ""}.
+
+DESTINATION FOCUS: {_dest_instr}
 
 TRAVELLER PROFILE:
 - Departing from: {starting_point}
@@ -907,7 +951,8 @@ WHY_YOU: [One sentence referencing their specific preferences and group type]
 ---END---
 
 Rules:
-- You MUST return exactly 3 destinations — this is mandatory
+- You MUST return exactly {_n_dest} destination(s) as specified above — returning a different number is not acceptable
+- Strictly honour the DESTINATION FOCUS instruction above — do not go outside the specified area if one is given
 - All destinations must be foreign (outside UK)
 - Each must be genuinely different in character
 - Match the trip type: {trip_type_text}
@@ -928,6 +973,8 @@ Rules:
                     )
                     st.session_state.inspire_results    = message.content[0].text
                     st.session_state.chosen_destination = None
+                    st.session_state.car_hire_rating    = None
+                    st.session_state.car_hire_confirmed = False
                     st.session_state.book_results       = None
                     st.session_state.support_results    = None
                     st.session_state.hotel_results      = None
@@ -956,7 +1003,10 @@ Rules:
                 destinations.append(d)
 
         if destinations:
-            st.markdown("### Your 3 Weekend Escapes")
+            _n_shown = len(destinations)
+            _area_label = f" in {st.session_state.get('dest_preference','')}" if st.session_state.get("dest_preference") else ""
+            _escape_heading = "Your Weekend Escape" if _n_shown == 1 else f"Your {_n_shown} Weekend Escapes"
+            st.markdown(f"### {_escape_heading}{_area_label}")
             for i, d in enumerate(destinations):
                 pills = "".join(
                     f'<span class="highlight-pill">✦ {h}</span>'
@@ -965,9 +1015,10 @@ Rules:
                 transfer_html = f'<div class="quick-fact">🚌 &nbsp;Transfer: <span>{d.get("transfer","")}</span></div>' if d.get("transfer") else ""
                 airport_html  = f'<div class="quick-fact">🛬 &nbsp;<span>{d.get("airport","")}</span></div>' if d.get("airport") else ""
                 dish_html     = f'<div class="local-dish">🍴 <strong>Must try:</strong> {d.get("dish","")}</div>' if d.get("dish") else ""
+                _card_title = d.get('name','') if _n_shown == 1 else f"Option {i+1}: {d.get('name','')}"
                 st.markdown(f"""
 <div class="dest-card">
-    <h3>Option {i+1}: {d.get('name','')}</h3>
+    <h3>{_card_title}</h3>
     <div class="vibe">{d.get('vibe','')}</div>
     <p class="summary">{d.get('summary','')}</p>
     <div>{pills}</div>
@@ -1533,16 +1584,44 @@ elif st.session_state.active_tab == "Book":
             _times_note = "· Times pre-filled from your flights" if _arr_time and _dep_time else "· Save your flight times above to pre-fill pickup &amp; dropoff times"
             _car_dates  = f"{_car_depart.strftime('%d %b')} → {_car_return.strftime('%d %b')}"
 
-            st.markdown(
-                '<div class="flight-link-card"><div>'
-                '<div class="flight-link-title">🚗 Hire a car for your trip</div>'
-                '<div class="flight-link-detail">'
-                + _car_ap_line + ' · ' + _car_dates + ' ' + _times_note +
-                '</div></div>'
-                '<a href="' + _car_url + '" target="_blank" class="flight-link-btn">Search Rentalcars →</a>'
-                '</div>',
-                unsafe_allow_html=True
-            )
+            _car_confirmed = st.session_state.get("car_hire_confirmed", False)
+
+            if _car_confirmed:
+                # Show confirmed banner
+                _confirmed_ap   = _car_ap_name if _car_iata else dest_city
+                _confirmed_iata = f" ({_car_iata})" if _car_iata else ""
+                st.markdown(
+                    '<div style="background:rgba(76,175,125,0.08);border:1px solid rgba(76,175,125,0.25);'
+                    'border-left:3px solid #4caf7d;border-radius:0 10px 10px 0;'
+                    'padding:14px 18px;margin:8px 0;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">'
+                    '<div>'
+                    '<div style="font-size:0.95rem;font-weight:600;color:#4caf7d;margin-bottom:4px">✅ Car hire booked</div>'
+                    '<div style="font-size:0.81rem;color:#8a9bb0">'
+                    'Collected at ' + _confirmed_ap + _confirmed_iata + ' · ' + _car_dates + ' · ' + _pu_time_str + ' pickup'
+                    '</div></div>'
+                    '</div>',
+                    unsafe_allow_html=True
+                )
+                if st.button("✏️ Change car hire", key="car_unconfirm"):
+                    st.session_state["car_hire_confirmed"] = False
+                    st.rerun()
+            else:
+                # Show search card
+                st.markdown(
+                    '<div class="flight-link-card"><div>'
+                    '<div class="flight-link-title">🚗 Hire a car for your trip</div>'
+                    '<div class="flight-link-detail">'
+                    + _car_ap_line + ' · ' + _car_dates + ' ' + _times_note +
+                    '</div></div>'
+                    '<a href="' + _car_url + '" target="_blank" class="flight-link-btn">Search Rentalcars →</a>'
+                    '</div>',
+                    unsafe_allow_html=True
+                )
+                st.markdown("")
+                if st.button("✅ Car booked — confirm selection", key="car_confirm"):
+                    st.session_state["car_hire_confirmed"] = True
+                    st.rerun()
+
             st.markdown("")
 
         # ── Hotel Recommendations ───────────────────────────────
@@ -2055,50 +2134,40 @@ FORMATTING RULES — follow exactly:
                     st.markdown(_sec)
 
 
-            # ── Interactive Map (Leaflet) ─────────────────────────
+            # ── Interactive Map + Google Maps Export ─────────────
             st.markdown("---")
             st.markdown("### 🗺️ Your Trip on the Map")
 
             if st.session_state.get("map_locations") is None:
                 with st.spinner("📍 Pinning your locations on the map..."):
                     try:
-                        extract_prompt = f"""
-Extract every specific named location from this travel itinerary for {dest}.
-Include: restaurants, cafes, bars, attractions, museums, markets, parks, viewpoints.
-Exclude: airports, accommodation, and generic transport references.
-
-ITINERARY:
-{st.session_state.book_results}
-
-Return ONLY a valid JSON array, no markdown, no explanation:
-[
-  {{
-    "name": "Exact venue name",
-    "type": "Restaurant",
-    "lat": 38.7223,
-    "lng": -9.1393,
-    "notes": "One short reason to visit"
-  }}
-]
-type must be one of: Restaurant, Cafe, Bar, Attraction, Museum, Market, Park, Viewpoint
-lat/lng must be real-world coordinates for the named place in {dest}.
-Return only the JSON array, starting with [ and ending with ].
-"""
-                        maps_response = claude_client.messages.create(
+                        import json as _mj, re as _mre
+                        _ep = (
+                            f"Extract every specific named location from this travel itinerary for {dest}.\n"
+                            "Include: restaurants, cafes, bars, attractions, museums, markets, parks, viewpoints.\n"
+                            "Exclude: airports, accommodation, and generic transport references.\n\n"
+                            f"ITINERARY:\n{st.session_state.book_results}\n\n"
+                            "Return ONLY a valid JSON array, no markdown, no explanation:\n"
+                            '[{"name":"Venue name","type":"Restaurant","lat":38.72,"lng":-9.13,"address":"Full address, City, Country","notes":"Why visit"}]\n'
+                            "type must be one of: Restaurant, Cafe, Bar, Attraction, Museum, Market, Park, Viewpoint\n"
+                            f"lat/lng must be accurate real-world coordinates for the place in {dest}.\n"
+                            "address must be a full address including street, city and country — this is used for Google Maps import.\n"
+                            "Return only the JSON array."
+                        )
+                        _mr2 = claude_client.messages.create(
                             model="claude-sonnet-4-6",
                             max_tokens=2000,
-                            messages=[{"role": "user", "content": extract_prompt}]
+                            messages=[{"role": "user", "content": _ep}]
                         )
-                        import json, re
-                        raw   = maps_response.content[0].text.strip()
-                        match = re.search(r"\[.*\]", raw, re.DOTALL)
-                        if match:
-                            st.session_state.map_locations = json.loads(match.group())
+                        _raw   = _mr2.content[0].text.strip()
+                        _match = _mre.search(r"\[.*\]", _raw, _mre.DOTALL)
+                        if _match:
+                            st.session_state.map_locations = _mj.loads(_match.group())
                         else:
                             st.session_state.map_locations = []
-                    except Exception as e:
+                    except Exception as _me:
                         st.session_state.map_locations = []
-                        st.warning(f"Could not extract map locations: {e}")
+                        st.warning(f"Could not extract map locations: {_me}")
 
             locations = st.session_state.get("map_locations") or []
 
@@ -2106,40 +2175,39 @@ Return only the JSON array, starting with [ and ending with ].
                 type_colours = {
                     "Restaurant": "#e74c3c", "Cafe": "#e67e22", "Bar": "#9b59b6",
                     "Attraction": "#2ecc71", "Museum": "#3498db", "Market": "#f1c40f",
-                    "Park": "#27ae60",       "Viewpoint": "#1abc9c",
+                    "Park":       "#27ae60", "Viewpoint": "#1abc9c",
                 }
                 type_icons = {
                     "Restaurant": "🍽️", "Cafe": "☕", "Bar": "🍸",
                     "Attraction": "🎭", "Museum": "🏛️", "Market": "🛍️",
-                    "Park": "🌳",       "Viewpoint": "📸",
+                    "Park":       "🌳", "Viewpoint": "📸",
                 }
 
                 avg_lat = sum(l["lat"] for l in locations) / len(locations)
                 avg_lng = sum(l["lng"] for l in locations) / len(locations)
 
-                # Build JS marker calls
+                # ── Leaflet map (works in Streamlit iframe) ────────
                 markers_js = ""
                 for loc in locations:
-                    colour = type_colours.get(loc.get("type", "Attraction"), "#d4af37")
-                    name_j  = loc["name"].replace("\\", "\\\\").replace("'", "\\'").replace('"', '\\"')
-                    notes_j = loc.get("notes","").replace("\\", "\\\\").replace("'", "\\'").replace('"', '\\"')
-                    type_j  = loc.get("type","").replace("'", "\\'")
-                    markers_js += f"""
-L.circleMarker([{loc["lat"]}, {loc["lng"]}], {{
-  radius: 10, fillColor: '{colour}', color: '#ffffff',
-  weight: 2, fillOpacity: 0.95
-}}).addTo(map).bindPopup(
-  '<b style="font-size:13px">{name_j}</b>' +
-  '<br><span style="font-size:10px;color:#888;text-transform:uppercase;letter-spacing:1px">{type_j}</span>' +
-  '<br><span style="font-size:12px;color:#444">{notes_j}</span>'
-);
-"""
+                    colour  = type_colours.get(loc.get("type", "Attraction"), "#c9a84c")
+                    name_j  = loc["name"].replace("'", "&#39;").replace('"', "&quot;")
+                    notes_j = loc.get("notes", "").replace("'", "&#39;").replace('"', "&quot;")
+                    type_j  = loc.get("type", "").replace("'", "&#39;")
+                    _popup  = (
+                        "<b>" + name_j + "</b>"
+                        "<br><small style='color:#aaa;text-transform:uppercase;letter-spacing:1px'>" + type_j + "</small>"
+                        "<br><span style='color:#666;font-size:11px'>" + notes_j + "</span>"
+                    )
+                    markers_js += (
+                        "L.circleMarker([" + str(loc["lat"]) + "," + str(loc["lng"]) + "],"
+                        "{radius:10,fillColor:'" + colour + "',color:'#fff',weight:2,fillOpacity:0.95})"
+                        ".addTo(map).bindPopup(" + repr(_popup) + ");\n"
+                    )
 
-                # Build legend HTML
-                seen_types = list(dict.fromkeys(l.get("type","") for l in locations if l.get("type")))
+                seen_types  = list(dict.fromkeys(l.get("type", "") for l in locations if l.get("type")))
                 legend_html = "".join(
-                    f'<div style="display:flex;align-items:center;gap:6px;margin:3px 0">'
-                    f'<div style="width:11px;height:11px;border-radius:50%;background:{type_colours.get(t,"#d4af37")};border:2px solid rgba(255,255,255,0.4)"></div>'
+                    '<div style="display:flex;align-items:center;gap:6px;margin:3px 0">'
+                    f'<div style="width:10px;height:10px;border-radius:50%;background:{type_colours.get(t,"#c9a84c")}"></div>'
                     f'<span>{type_icons.get(t,"📍")} {t}</span></div>'
                     for t in seen_types
                 )
@@ -2149,45 +2217,80 @@ L.circleMarker([{loc["lat"]}, {loc["lng"]}], {{
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <style>
-  html, body {{ margin:0; padding:0; background:#0f1923; height:100%; }}
-  #map {{ width:100%; height:480px; }}
-  .legend {{
-    position:absolute; bottom:20px; left:10px; z-index:1000;
-    background:rgba(15,25,35,0.92); border:1px solid rgba(212,175,55,0.35);
-    border-radius:8px; padding:10px 14px; font-size:12px;
-    color:#e8e0d5; font-family:sans-serif; pointer-events:none;
-  }}
-  .legend-title {{ font-weight:700; color:#d4af37; font-size:10px;
-    letter-spacing:1px; text-transform:uppercase; margin-bottom:6px; }}
+  html,body{{margin:0;padding:0;background:#0c1118;height:100%}}
+  #map{{width:100%;height:440px}}
+  .legend{{position:absolute;bottom:16px;left:10px;z-index:1000;
+    background:rgba(12,17,24,0.93);border:1px solid rgba(201,168,76,0.3);
+    border-radius:8px;padding:10px 14px;font-size:12px;color:#e8e2d9;font-family:sans-serif;pointer-events:none}}
+  .legend-title{{font-weight:600;color:#c9a84c;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:6px}}
 </style>
-</head>
-<body>
+</head><body>
 <div id="map"></div>
-<div class="legend">
-  <div class="legend-title">Locations</div>
-  {legend_html}
-</div>
+<div class="legend"><div class="legend-title">Locations</div>{legend_html}</div>
 <script>
-var map = L.map('map', {{zoomControl:true, scrollWheelZoom:true}})
-           .setView([{avg_lat}, {avg_lng}], 14);
-
-L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png', {{
-  attribution: '© OpenStreetMap © CARTO',
-  subdomains: 'abcd',
-  maxZoom: 19
+var map = L.map('map',{{zoomControl:true,scrollWheelZoom:true}}).setView([{avg_lat},{avg_lng}],14);
+L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png',{{
+  attribution:'© OpenStreetMap © CARTO',subdomains:'abcd',maxZoom:19
 }}).addTo(map);
-
 {markers_js}
-</script>
-</body></html>"""
+</script></body></html>"""
 
-                st.components.v1.html(map_html, height=500)
-
-                # Location list beneath the map
+                st.components.v1.html(map_html, height=460)
                 st.markdown("")
+
+                # ── Google Maps export ─────────────────────────────
+                # Build CSV for Google My Maps — each row becomes its own pin
+                import io as _io, csv as _csv
+                _csv_buf = _io.StringIO()
+                _writer  = _csv.writer(_csv_buf)
+                _writer.writerow(["Name", "Type", "Address", "Notes", "Latitude", "Longitude"])
+                for loc in locations:
+                    _writer.writerow([
+                        loc.get("name", ""),
+                        loc.get("type", ""),
+                        loc.get("address", dest_city),
+                        loc.get("notes", ""),
+                        loc.get("lat", ""),
+                        loc.get("lng", ""),
+                    ])
+                _csv_data = _csv_buf.getvalue()
+
+                _exp_col1, _exp_col2 = st.columns([2, 3])
+                with _exp_col1:
+                    st.download_button(
+                        label="⬇️ Download for Google Maps",
+                        data=_csv_data,
+                        file_name=f"sherpa_{dest_city.lower().replace(' ','_')}_locations.csv",
+                        mime="text/csv",
+                        help="Import into Google My Maps to get every pin as a separate, clickable map point",
+                        use_container_width=True,
+                    )
+
+                with st.expander("📖 How to open these as individual pins in Google Maps"):
+                    st.markdown("""
+**On mobile or desktop — Google My Maps:**
+1. Download the CSV above
+2. Go to **[mymaps.google.com](https://mymaps.google.com)** (or Google Maps → Saved → Maps)
+3. Click **Create a new map**
+4. Click **Import** in the left panel → upload the CSV
+5. When prompted: set **Address** or **Latitude/Longitude** as location, **Name** as title
+6. Every venue becomes its own colour-coded pin ✅
+7. Tap any pin to see the name, type and notes
+8. Share the map link with travel companions
+
+**On mobile:** open [mymaps.google.com](https://mymaps.google.com) in your browser — it works on iOS and Android and syncs to the Google Maps app automatically.
+""")
+
+                # ── Location list ──────────────────────────────────
+                st.markdown("")
+                st.markdown(
+                    '<div style="font-size:0.7rem;color:#5f7080;letter-spacing:2px;'
+                    'text-transform:uppercase;margin-bottom:0.8rem">All locations</div>',
+                    unsafe_allow_html=True
+                )
                 cols_by_type = {}
                 for loc in locations:
-                    cols_by_type.setdefault(loc.get("type","Other"), []).append(loc)
+                    cols_by_type.setdefault(loc.get("type", "Other"), []).append(loc)
                 col_groups = list(cols_by_type.items())
                 for i in range(0, len(col_groups), 2):
                     c1, c2 = st.columns(2)
@@ -2197,12 +2300,14 @@ L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}
                             st.markdown(f"**{icon} {typ}s**")
                             for p in places:
                                 st.markdown(
-                                    f"&nbsp;&nbsp;**{p['name']}** — "
-                                    f"<span style='color:#8a9bb0;font-size:0.82rem'>{p.get('notes','')}</span>",
+                                    f'&nbsp;&nbsp;**{p["name"]}**'
+                                    f' <span style="color:#8a9bb0;font-size:0.79rem">— {p.get("notes","")}</span>',
                                     unsafe_allow_html=True
                                 )
                             st.markdown("")
 
-            if st.button("🔄 Refresh map locations"):
-                st.session_state.map_locations = None
-                st.rerun()
+            _rc1, _rc2 = st.columns([1, 4])
+            with _rc1:
+                if st.button("🔄 Refresh map"):
+                    st.session_state.map_locations = None
+                    st.rerun()
