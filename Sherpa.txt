@@ -1,5 +1,0 @@
-Sherpa
-Car hire early in the selection process 
-integrate with holiday extras
-Booking.com api link
-Make sure prompts in itinerary specifically account for where the chosen location is
