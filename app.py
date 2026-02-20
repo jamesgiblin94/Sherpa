@@ -1991,7 +1991,7 @@ FORMATTING RULES — follow exactly:
 """
                     message = claude_client.messages.create(
                         model="claude-sonnet-4-6",
-                        max_tokens=2500,
+                        max_tokens=4000,
                         messages=[{"role": "user", "content": prompt}]
                     )
                     st.session_state.book_results = message.content[0].text
@@ -2096,7 +2096,7 @@ FORMATTING RULES — follow exactly:
                         )
 
                 # ── Cost guide ───────────────────────────────────
-                elif "Cost" in _heading:
+                elif "Cost" in _heading or "cost" in _heading.lower():
                     st.markdown(f"### {_heading}")
                     _cost_lines = [l.strip() for l in _body.split("\n") if l.strip().startswith("-")]
                     _rows_html = ""
@@ -2186,22 +2186,49 @@ FORMATTING RULES — follow exactly:
                 avg_lat = sum(l["lat"] for l in locations) / len(locations)
                 avg_lng = sum(l["lng"] for l in locations) / len(locations)
 
-                # ── Leaflet map (works in Streamlit iframe) ────────
+                # ── Leaflet map with Google Maps popup links ────────
+                import urllib.parse as _uparse
                 markers_js = ""
-                for loc in locations:
-                    colour  = type_colours.get(loc.get("type", "Attraction"), "#c9a84c")
-                    name_j  = loc["name"].replace("'", "&#39;").replace('"', "&quot;")
-                    notes_j = loc.get("notes", "").replace("'", "&#39;").replace('"', "&quot;")
-                    type_j  = loc.get("type", "").replace("'", "&#39;")
-                    _popup  = (
-                        "<b>" + name_j + "</b>"
-                        "<br><small style='color:#aaa;text-transform:uppercase;letter-spacing:1px'>" + type_j + "</small>"
-                        "<br><span style='color:#666;font-size:11px'>" + notes_j + "</span>"
+                for idx, loc in enumerate(locations):
+                    colour   = type_colours.get(loc.get("type", "Attraction"), "#c9a84c")
+                    name_e   = loc["name"].replace("'", "&#39;").replace('"', "&quot;")
+                    notes_e  = loc.get("notes", "").replace("'", "&#39;").replace('"', "&quot;")
+                    type_e   = loc.get("type", "").replace("'", "&#39;")
+                    num      = idx + 1
+                    # Google Maps search URL for this specific venue
+                    gm_query = _uparse.quote(f"{loc['name']}, {dest_city}")
+                    gm_url   = f"https://www.google.com/maps/search/?api=1&query={gm_query}"
+                    _popup = (
+                        f"<div style='font-family:sans-serif;min-width:180px;padding:2px'>"
+                        f"<div style='font-weight:700;font-size:13px;color:#1a1a2e;margin-bottom:2px'>"
+                        f"<span style='background:{colour};color:#fff;border-radius:50%;width:18px;height:18px;"
+                        f"display:inline-flex;align-items:center;justify-content:center;font-size:10px;"
+                        f"font-weight:700;margin-right:6px'>{num}</span>{name_e}</div>"
+                        f"<div style='font-size:10px;color:#888;text-transform:uppercase;letter-spacing:1px;"
+                        f"margin-bottom:4px'>{type_e}</div>"
+                        f"<div style='font-size:11px;color:#555;margin-bottom:8px'>{notes_e}</div>"
+                        f"<a href='{gm_url}' target='_blank' style='display:inline-block;background:#4285F4;"
+                        f"color:#fff;padding:5px 10px;border-radius:4px;font-size:11px;font-weight:600;"
+                        f"text-decoration:none;letter-spacing:0.5px'>📍 Open in Google Maps ↗</a>"
+                        f"</div>"
+                    )
+                    # Numbered div icon — build without nested f-strings to avoid brace issues
+                    _div_style = (
+                        "width:26px;height:26px;border-radius:50%;"
+                        f"background:{colour};border:2.5px solid #fff;"
+                        "display:flex;align-items:center;justify-content:center;"
+                        "font-size:11px;font-weight:700;color:#fff;"
+                        "box-shadow:0 2px 6px rgba(0,0,0,0.4)"
+                    )
+                    _div_html = f'<div style=\\"{_div_style}\\">{num}</div>'
+                    icon_js = (
+                        "L.divIcon({className:'',html:'" + _div_html + "',"
+                        "iconSize:[26,26],iconAnchor:[13,13],popupAnchor:[0,-13]})"
                     )
                     markers_js += (
-                        "L.circleMarker([" + str(loc["lat"]) + "," + str(loc["lng"]) + "],"
-                        "{radius:10,fillColor:'" + colour + "',color:'#fff',weight:2,fillOpacity:0.95})"
-                        ".addTo(map).bindPopup(" + repr(_popup) + ");\n"
+                        f"L.marker([{loc['lat']},{loc['lng']}],"
+                        "{icon:" + icon_js + "})"
+                        f".addTo(map).bindPopup({repr(_popup)},{{maxWidth:260}});\n"
                     )
 
                 seen_types  = list(dict.fromkeys(l.get("type", "") for l in locations if l.get("type")))
@@ -2223,10 +2250,11 @@ FORMATTING RULES — follow exactly:
     background:rgba(12,17,24,0.93);border:1px solid rgba(201,168,76,0.3);
     border-radius:8px;padding:10px 14px;font-size:12px;color:#e8e2d9;font-family:sans-serif;pointer-events:none}}
   .legend-title{{font-weight:600;color:#c9a84c;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:6px}}
+  .leaflet-popup-content-wrapper{{border-radius:8px!important;box-shadow:0 4px 20px rgba(0,0,0,0.25)!important}}
 </style>
 </head><body>
 <div id="map"></div>
-<div class="legend"><div class="legend-title">Locations</div>{legend_html}</div>
+<div class="legend"><div class="legend-title">Tap a pin to open in Google Maps</div>{legend_html}</div>
 <script>
 var map = L.map('map',{{zoomControl:true,scrollWheelZoom:true}}).setView([{avg_lat},{avg_lng}],14);
 L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png',{{
@@ -2238,8 +2266,13 @@ L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}
                 st.components.v1.html(map_html, height=460)
                 st.markdown("")
 
-                # ── Google Maps export ─────────────────────────────
-                # Build CSV for Google My Maps — each row becomes its own pin
+                # ── Google Maps buttons ────────────────────────────
+                # "Open all" URL — uses first location as origin, rest as waypoints (max 10)
+                _gm_stops   = locations[:10]
+                _gm_coords  = "/".join(f"{l['lat']},{l['lng']}" for l in _gm_stops)
+                _gm_all_url = f"https://www.google.com/maps/dir/{_gm_coords}"
+
+                # CSV for My Maps import
                 import io as _io, csv as _csv
                 _csv_buf = _io.StringIO()
                 _writer  = _csv.writer(_csv_buf)
@@ -2255,33 +2288,37 @@ L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}
                     ])
                 _csv_data = _csv_buf.getvalue()
 
-                _exp_col1, _exp_col2 = st.columns([2, 3])
-                with _exp_col1:
+                _gc1, _gc2 = st.columns(2)
+                with _gc1:
+                    st.markdown(
+                        f'<a href="{_gm_all_url}" target="_blank" style="display:block;text-align:center;'
+                        f'background:#4285F4;color:#fff;padding:10px 16px;border-radius:8px;'
+                        f'font-weight:600;font-size:0.85rem;text-decoration:none;letter-spacing:0.3px">'
+                        f'📍 Open all stops in Google Maps ↗</a>',
+                        unsafe_allow_html=True
+                    )
+                with _gc2:
                     st.download_button(
-                        label="⬇️ Download for Google Maps",
+                        label="⬇️ Download CSV for Google My Maps",
                         data=_csv_data,
                         file_name=f"sherpa_{dest_city.lower().replace(' ','_')}_locations.csv",
                         mime="text/csv",
-                        help="Import into Google My Maps to get every pin as a separate, clickable map point",
+                        help="Import into mymaps.google.com to get every venue as its own individual pin",
                         use_container_width=True,
                     )
 
-                with st.expander("📖 How to open these as individual pins in Google Maps"):
+                with st.expander("📖 How to get individual pins in Google My Maps"):
                     st.markdown("""
-**On mobile or desktop — Google My Maps:**
 1. Download the CSV above
-2. Go to **[mymaps.google.com](https://mymaps.google.com)** (or Google Maps → Saved → Maps)
-3. Click **Create a new map**
-4. Click **Import** in the left panel → upload the CSV
-5. When prompted: set **Address** or **Latitude/Longitude** as location, **Name** as title
-6. Every venue becomes its own colour-coded pin ✅
-7. Tap any pin to see the name, type and notes
-8. Share the map link with travel companions
-
-**On mobile:** open [mymaps.google.com](https://mymaps.google.com) in your browser — it works on iOS and Android and syncs to the Google Maps app automatically.
+2. Go to **[mymaps.google.com](https://mymaps.google.com)** → **Create a new map**
+3. Click **Import** → upload the CSV file
+4. When prompted: choose **Latitude/Longitude** as the location columns, **Name** as the title
+5. Every venue appears as its own separate, clickable pin ✅
+6. Tap any pin to see the venue name, type and notes
+7. Share the map link with travel companions — syncs to the Google Maps app automatically
 """)
 
-                # ── Location list ──────────────────────────────────
+                # ── Location list with individual Google Maps links ──
                 st.markdown("")
                 st.markdown(
                     '<div style="font-size:0.7rem;color:#5f7080;letter-spacing:2px;'
@@ -2299,8 +2336,12 @@ L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}
                             icon = type_icons.get(typ, "📍")
                             st.markdown(f"**{icon} {typ}s**")
                             for p in places:
+                                _pq  = _uparse.quote(f"{p['name']}, {dest_city}")
+                                _pu  = f"https://www.google.com/maps/search/?api=1&query={_pq}"
                                 st.markdown(
-                                    f'&nbsp;&nbsp;**{p["name"]}**'
+                                    f'&nbsp;&nbsp;**<a href="{_pu}" target="_blank" '
+                                    f'style="color:inherit;text-decoration:none">'
+                                    f'{p["name"]} ↗</a>**'
                                     f' <span style="color:#8a9bb0;font-size:0.79rem">— {p.get("notes","")}</span>',
                                     unsafe_allow_html=True
                                 )
