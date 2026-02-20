@@ -13,15 +13,19 @@ from airports import get_iata_codes, get_sky_code, get_primary_iata, get_all_iat
 load_dotenv()
 
 def _secret(key, default=""):
+    """Read from st.secrets (cloud) with os.getenv fallback (local)."""
     try:
-        return st.secrets[key]
+        val = st.secrets.get(key)
+        if val:
+            return val
     except Exception:
-        return os.getenv(key, default)
+        pass
+    return os.getenv(key, default) or default
 
-ANTHROPIC_API_KEY       = _secret("ANTHROPIC_API_KEY")
+ANTHROPIC_API_KEY       = _secret("ANTHROPIC_API_KEY",       "")
 SKYSCANNER_AFFILIATE_ID = _secret("SKYSCANNER_AFFILIATE_ID", "")
-GOOGLE_MAPS_API_KEY     = _secret("GOOGLE_MAPS_API_KEY", "")
-BOOKING_AFFILIATE_ID    = _secret("BOOKING_AFFILIATE_ID", "")
+GOOGLE_MAPS_API_KEY     = _secret("GOOGLE_MAPS_API_KEY",     "")
+BOOKING_AFFILIATE_ID    = _secret("BOOKING_AFFILIATE_ID",    "")
 
 # ============================================================
 # PAGE SETUP
