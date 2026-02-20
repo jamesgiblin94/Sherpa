@@ -1,0 +1,7 @@
+.env
+__pycache__/
+*.pyc
+venv/
+*.txt
+API Code.txt
+Sherpa.txt

@@ -452,7 +452,7 @@ def get_nearest_airport(dest_name, claude_client):
             if db_iatas else ""
         )
         prompt = (
-            f'For the travel destination "{dest_name}", list up to 3 airports that a UK traveller could realistically fly into.\n\n'
+            f'A UK traveller wants to fly to "{dest_name}". List specific named airports with IATA codes — never return a region name.\n\n'
             + db_hint +
             'CRITICAL RULES:\n'
             '- ONLY include airports with direct flights OR easy 1-stop connections from UK airports (LHR, LGW, STN, MAN, EDI, BHX, BRS etc.)\n'
@@ -483,7 +483,7 @@ def get_nearest_airport(dest_name, claude_client):
 
         response = claude_client.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=600,
+            max_tokens=1200,
             messages=[{"role": "user", "content": prompt}]
         )
         raw   = response.content[0].text.strip()

@@ -913,6 +913,10 @@ Rules:
 - Match the trip type: {trip_type_text}
 - Keep all costs realistic for {travel_month} 2025/2026
 - Weather must be specific to {travel_month}
+- CRITICAL: NAME must always be a specific CITY or TOWN — never a region, area or
+  coastline. Use "Seville" not "Andalusia", "Faro" not "Algarve", "Palma" not
+  "Mallorca", "Heraklion" not "Crete". The city name is used to look up flights
+  so it must be a real city with its own airport or clear gateway city.
 - IMPORTANT: Strongly prefer destinations with frequent direct flights or very short
   1-stop connections from {starting_point}. Avoid destinations requiring long layovers
   — this is a weekend trip so travel time is precious.
@@ -1024,6 +1028,62 @@ elif st.session_state.active_tab == "Book":
         dest      = st.session_state.chosen_destination
         dest_city = dest.split(",")[0].strip()
 
+        # Normalise region names to their gateway airport city so the
+        # airport lookup returns specific airports rather than vague regions.
+        _REGION_GATEWAY = {
+            "algarve":            "Faro",
+            "costa del sol":      "Malaga",
+            "andalusia":          "Malaga",
+            "andalucia":          "Malaga",
+            "catalonia":          "Barcelona",
+            "tuscany":            "Florence",
+            "toscana":            "Florence",
+            "provence":           "Marseille",
+            "cote d'azur":       "Nice",
+            "french riviera":     "Nice",
+            "amalfi coast":       "Naples",
+            "sicily":             "Palermo",
+            "sardinia":           "Cagliari",
+            "crete":              "Heraklion",
+            "corfu":              "Corfu",
+            "rhodes":             "Rhodes",
+            "mykonos":            "Mykonos",
+            "santorini":          "Santorini",
+            "ibiza":              "Ibiza",
+            "mallorca":           "Palma",
+            "majorca":            "Palma",
+            "menorca":            "Mahon",
+            "tenerife":           "Tenerife South",
+            "lanzarote":          "Lanzarote",
+            "fuerteventura":      "Fuerteventura",
+            "gran canaria":       "Las Palmas",
+            "madeira":            "Funchal",
+            "azores":             "Ponta Delgada",
+            "balearic islands":   "Palma",
+            "canary islands":     "Las Palmas",
+            "lake district":      "Manchester",
+            "cotswolds":          "Birmingham",
+            "peak district":      "Manchester",
+            "highlands":          "Inverness",
+            "scottish highlands": "Inverness",
+            "dordogne":           "Bordeaux",
+            "normandy":           "Paris",
+            "brittany":           "Nantes",
+            "loire valley":       "Tours",
+            "alps":               "Geneva",
+            "french alps":        "Geneva",
+            "italian alps":       "Milan",
+            "dolomites":          "Venice",
+            "black forest":       "Stuttgart",
+            "bavarian alps":      "Munich",
+            "dalmatian coast":    "Split",
+            "istria":             "Pula",
+            "alentejo":           "Lisbon",
+            "douro valley":       "Porto",
+        }
+        _gateway = _REGION_GATEWAY.get(dest_city.lower())
+        _airport_lookup_city = _gateway if _gateway else dest_city
+
         # If the user jumped to Book without Inspire, collect essentials inline
         if not profile.get("starting_point"):
             with st.expander("🎒 Quick preferences needed", expanded=True):
@@ -1093,7 +1153,7 @@ elif st.session_state.active_tab == "Book":
         # survives reruns without hitting the API again
         _ap_cache_key = f"_airports_{dest_city.lower()}"
         if not st.session_state.get(_ap_cache_key):
-            dest_airports_raw = get_nearest_airport(dest_city, claude_client)
+            dest_airports_raw = get_nearest_airport(_airport_lookup_city, claude_client)
             if isinstance(dest_airports_raw, dict):
                 dest_airports = [dest_airports_raw]
             elif isinstance(dest_airports_raw, list):
