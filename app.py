@@ -620,6 +620,9 @@ defaults = {
     "book_results":       None,
     "support_results":    None,
     "chat_history":       [],
+    "on_trip_loc":        None,   # {"lat": x, "lng": y, "address": "..."}
+    "on_trip_nearby":     None,   # cached nearby suggestions
+    "on_trip_history":    None,   # cached historical context
     "user_profile":       {},
     "flight_details":     {},
     "maps_csv":           None,
@@ -2669,3 +2672,239 @@ Answer questions about this trip helpfully and concisely. Keep responses practic
             if st.button("🗑️ Clear chat"):
                 st.session_state.chat_history = []
                 st.rerun()
+
+
+        # ════════════════════════════════════════════════════════
+        # ON THE TRIP — live local guide using device location
+        # ════════════════════════════════════════════════════════
+        st.markdown("---")
+        st.markdown("## 📍 On the Trip")
+        st.markdown(
+            "*Already there? Let Sherpa find what's around you right now — "
+            "restaurants, bars, cafes, and the history of what you're looking at.*"
+        )
+
+        # ── Location capture via browser geolocation ──────────
+        _loc_html = """<!DOCTYPE html>
+<html><head><meta charset="utf-8"><style>
+  body{margin:0;padding:0;font-family:sans-serif;background:transparent}
+  button{background:#c9a84c;color:#0c1118;border:none;padding:10px 20px;
+    border-radius:8px;font-weight:700;font-size:14px;cursor:pointer;
+    letter-spacing:0.5px;width:100%}
+  button:hover{background:#e0bc6a}
+  #status{font-size:12px;color:#8a9bb0;margin-top:8px;text-align:center}
+  #result{font-size:11px;color:#4caf7d;margin-top:6px;text-align:center;word-break:break-all}
+</style></head><body>
+<button onclick="getLocation()">📍 Share my current location</button>
+<div id="status"></div>
+<div id="result"></div>
+<script>
+function getLocation() {
+  var s = document.getElementById('status');
+  var r = document.getElementById('result');
+  s.textContent = 'Getting your location...';
+  if (!navigator.geolocation) {
+    s.textContent = 'Geolocation not supported on this browser.';
+    return;
+  }
+  navigator.geolocation.getCurrentPosition(
+    function(pos) {
+      var lat = pos.coords.latitude.toFixed(6);
+      var lng = pos.coords.longitude.toFixed(6);
+      var acc = Math.round(pos.coords.accuracy);
+      s.textContent = 'Location found! Accuracy: ~' + acc + 'm';
+      r.textContent = 'LAT:' + lat + ' LNG:' + lng;
+      // Write to a hidden input Streamlit can read via query param trick
+      var url = new URL(window.parent.location.href);
+      url.searchParams.set('user_lat', lat);
+      url.searchParams.set('user_lng', lng);
+      window.parent.history.replaceState({}, '', url);
+      // Trigger page refresh after short delay
+      setTimeout(function(){ window.parent.location.reload(); }, 800);
+    },
+    function(err) {
+      s.textContent = 'Could not get location: ' + err.message;
+    },
+    {enableHighAccuracy: true, timeout: 10000}
+  );
+}
+</script></body></html>"""
+
+        # Read location from query params (set by JS above)
+        _q_lat = st.query_params.get("user_lat", "")
+        _q_lng = st.query_params.get("user_lng", "")
+
+        if _q_lat and _q_lng:
+            try:
+                _u_lat = float(_q_lat)
+                _u_lng = float(_q_lng)
+                # Store if changed
+                _prev = st.session_state.get("on_trip_loc") or {}
+                if abs(_prev.get("lat", 0) - _u_lat) > 0.0001 or abs(_prev.get("lng", 0) - _u_lng) > 0.0001:
+                    st.session_state["on_trip_loc"]     = {"lat": _u_lat, "lng": _u_lng}
+                    st.session_state["on_trip_nearby"]  = None
+                    st.session_state["on_trip_history"] = None
+            except Exception:
+                pass
+
+        _u_loc = st.session_state.get("on_trip_loc")
+
+        if not _u_loc:
+            st.components.v1.html(_loc_html, height=100)
+            st.markdown(
+                '<div style="font-size:0.75rem;color:#5f7080;margin-top:8px;text-align:center">'
+                'Your location is only used in this session and never stored.</div>',
+                unsafe_allow_html=True
+            )
+        else:
+            _u_lat = _u_loc["lat"]
+            _u_lng = _u_loc["lng"]
+
+            # Location confirmed banner
+            st.markdown(
+                f'<div style="background:rgba(76,175,125,0.08);border:1px solid rgba(76,175,125,0.3);'
+                f'border-radius:10px;padding:10px 16px;margin-bottom:16px;'
+                f'display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">'
+                f'<div style="font-size:0.85rem;color:#4caf7d">📍 Location: {_u_lat:.5f}, {_u_lng:.5f}</div>'
+                f'<div style="font-size:0.75rem;color:#5f7080">Tap below to explore around you</div>'
+                f'</div>',
+                unsafe_allow_html=True
+            )
+
+            # ── Two action buttons ────────────────────────────────
+            _act1, _act2, _act3 = st.columns(3)
+
+            with _act1:
+                if st.button("🍽️ What's nearby?", use_container_width=True, key="btn_nearby"):
+                    st.session_state["on_trip_nearby"] = None
+
+            with _act2:
+                if st.button("🏛️ What am I looking at?", use_container_width=True, key="btn_history"):
+                    st.session_state["on_trip_history"] = None
+
+            with _act3:
+                if st.button("📍 Update location", use_container_width=True, key="btn_reloc"):
+                    st.session_state["on_trip_loc"]     = None
+                    st.session_state["on_trip_nearby"]  = None
+                    st.session_state["on_trip_history"] = None
+                    # Clear query params
+                    st.query_params.pop("user_lat", None)
+                    st.query_params.pop("user_lng", None)
+                    st.rerun()
+
+            # ── Nearby food & drink ───────────────────────────────
+            if st.session_state.get("on_trip_nearby") is None and st.session_state.get("btn_nearby"):
+                with st.spinner("🔍 Finding what's around you..."):
+                    try:
+                        _nearby_prompt = (
+                            f"The traveller is standing at coordinates {_u_lat:.5f}, {_u_lng:.5f}.\n"
+                            f"They are visiting {_s_dest}.\n"
+                            f"Their budget is {_s_profile.get('budget','mid-range')} and group is {_s_profile.get('group_type','travellers')}.\n\n"
+                            "Based on these exact coordinates, suggest:\n"
+                            "- 3 restaurants within 10 minutes walk (real places, varied cuisine, suited to their budget)\n"
+                            "- 2 cafes or coffee spots within 5 minutes walk\n"
+                            "- 2 bars or evening drinks spots within 10 minutes walk\n\n"
+                            "For EACH place give:\n"
+                            "NAME | TYPE | Walking time | Price range | One sentence why it's worth it\n\n"
+                            "Be specific to this exact location. Include neighbourhood names, street references. "
+                            "Prioritise places that locals actually use, not just tourist traps.\n\n"
+                            "Format each as a JSON array:\n"
+                            '[{"name":"Cafe X","type":"Cafe","walk":"3 min","price":"£","why":"Best espresso in the neighbourhood"}]'
+                        )
+                        _nr = claude_client.messages.create(
+                            model="claude-sonnet-4-6",
+                            max_tokens=1000,
+                            messages=[{"role": "user", "content": _nearby_prompt}]
+                        )
+                        import json as _nj, re as _nre
+                        _nraw   = _nr.content[0].text.strip()
+                        _nmatch = _nre.search(r"\[.*\]", _nraw, _nre.DOTALL)
+                        if _nmatch:
+                            st.session_state["on_trip_nearby"] = _nj.loads(_nmatch.group())
+                        else:
+                            st.session_state["on_trip_nearby"] = []
+                    except Exception as _ne:
+                        st.session_state["on_trip_nearby"] = []
+                        st.warning(f"Could not fetch nearby places: {_ne}")
+                st.rerun()
+
+            # Render nearby results
+            _nearby_results = st.session_state.get("on_trip_nearby")
+            if _nearby_results:
+                _type_icon_map = {"Restaurant": "🍽️", "Cafe": "☕", "Bar": "🍸", "Pub": "🍺"}
+                _type_groups   = {}
+                for _nr in _nearby_results:
+                    _type_groups.setdefault(_nr.get("type","Other"), []).append(_nr)
+
+                st.markdown(
+                    '<div style="font-size:0.7rem;color:#5f7080;letter-spacing:2px;'
+                    'text-transform:uppercase;margin:16px 0 10px">Around you right now</div>',
+                    unsafe_allow_html=True
+                )
+                for _grp_type, _grp_places in _type_groups.items():
+                    _grp_icon = _type_icon_map.get(_grp_type, "📍")
+                    st.markdown(f"**{_grp_icon} {_grp_type}s**")
+                    for _pl in _grp_places:
+                        _pl_name  = _pl.get("name","")
+                        _pl_walk  = _pl.get("walk","")
+                        _pl_price = _pl.get("price","")
+                        _pl_why   = _pl.get("why","")
+                        # Google Maps link for this place
+                        import urllib.parse as _nup
+                        _pl_gm = f"https://www.google.com/maps/search/?api=1&query={_nup.quote(_pl_name + ' ' + _s_dest)}"
+                        st.markdown(
+                            f'<div style="background:rgba(15,25,35,0.5);border:1px solid rgba(255,255,255,0.07);'
+                            f'border-radius:9px;padding:12px 16px;margin:5px 0">'
+                            f'<div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:3px">'
+                            f'<a href="{_pl_gm}" target="_blank" style="font-weight:700;color:#e8e0d5;font-size:0.9rem;text-decoration:none">'
+                            f'{_pl_name} ↗</a>'
+                            f'<span style="font-size:0.75rem;color:#c9a84c">{_pl_price} · {_pl_walk}</span>'
+                            f'</div>'
+                            f'<div style="font-size:0.8rem;color:#8a9bb0">{_pl_why}</div>'
+                            f'</div>',
+                            unsafe_allow_html=True
+                        )
+                    st.markdown("")
+
+            # ── Historical context ────────────────────────────────
+            if st.session_state.get("on_trip_history") is None and st.session_state.get("btn_history"):
+                with st.spinner("🏛️ Reading the history around you..."):
+                    try:
+                        _hist_prompt = (
+                            f"The traveller is standing at coordinates {_u_lat:.5f}, {_u_lng:.5f} in {_s_dest}.\n\n"
+                            "Identify the most historically or architecturally significant landmarks, buildings, "
+                            "streets or squares that would be visible or within a short walk of these exact coordinates.\n\n"
+                            "For each landmark write:\n"
+                            "- Its name and what it looks like (so they can identify it)\n"
+                            "- The most interesting historical fact or story about it (2-3 sentences)\n"
+                            "- Approximate distance/direction from these coordinates\n\n"
+                            "Cover 3-5 landmarks. Be specific to this exact location — not generic city facts. "
+                            "Write in second person, present tense, as if guiding them right now. "
+                            "Make it feel like a knowledgeable local friend is pointing things out.\n\n"
+                            "Keep the whole response under 350 words."
+                        )
+                        _hr = claude_client.messages.create(
+                            model="claude-sonnet-4-6",
+                            max_tokens=600,
+                            messages=[{"role": "user", "content": _hist_prompt}]
+                        )
+                        st.session_state["on_trip_history"] = _hr.content[0].text.strip()
+                    except Exception as _he:
+                        st.session_state["on_trip_history"] = f"Could not fetch historical context: {_he}"
+                st.rerun()
+
+            _hist_result = st.session_state.get("on_trip_history")
+            if _hist_result:
+                st.markdown(
+                    '<div style="font-size:0.7rem;color:#5f7080;letter-spacing:2px;'
+                    'text-transform:uppercase;margin:16px 0 10px">What you\'re looking at</div>',
+                    unsafe_allow_html=True
+                )
+                st.markdown(
+                    f'<div style="background:rgba(15,25,35,0.6);border:1px solid rgba(201,168,76,0.2);'
+                    f'border-left:3px solid #c9a84c;border-radius:0 10px 10px 0;'
+                    f'padding:16px 20px;font-size:0.88rem;line-height:1.7;color:#c8bfa8">'
+                    f'{_hist_result.replace(chr(10), "<br>")}'
+                    f'</div>',
+                    unsafe_allow_html=True
+                )
