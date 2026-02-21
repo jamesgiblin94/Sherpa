@@ -37,10 +37,8 @@ app.add_middleware(
         "https://sherpatravel.uk",
         "https://www.sherpatravel.uk",
         "https://sherpa-lude339ru-jamesgiblin94s-projects.vercel.app",
+        "https://sherpa-six.vercel.app",
     ],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def skyscanner_url(origin_sky: str, dest_sky: str, depart: str, ret: str, adults: int) -> str:
