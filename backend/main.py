@@ -30,7 +30,14 @@ app = FastAPI(title="Sherpa API", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000", "https://sherpaai.uk"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "https://sherpaai.uk",
+        "https://sherpatravel.uk",
+        "https://www.sherpatravel.uk",
+        "https://sherpa-lude339ru-jamesgiblin94s-projects.vercel.app",
+    ],
     allow_methods=["*"],
     allow_headers=["*"],
 )
