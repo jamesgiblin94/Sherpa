@@ -611,34 +611,71 @@ st.markdown("""
 """
 , unsafe_allow_html=True)
 
-# ── Monday week-start injector for date pickers ─────────────
+# ── Monday week-start + DD/MM/YYYY format injector ──────────
 import streamlit.components.v1 as _stc
 _stc.html("""<script>
 (function() {
+  var _processed = new WeakSet();
+
   function fixCalendar() {
-    // Streamlit uses react-datepicker / baseweb Calendar
-    // Reorder day headers: remove Sun from front, append to end
-    var attempts = 0;
-    var interval = setInterval(function() {
-      var grids = document.querySelectorAll('[data-baseweb="calendar"] [role="grid"]');
-      grids.forEach(function(grid) {
-        var colHeaders = grid.querySelectorAll('[role="columnheader"]');
-        if (colHeaders.length === 7) {
-          var parent = colHeaders[0].parentNode;
-          // If first header is Sunday (Su), move it to end
-          if (colHeaders[0].textContent.trim().startsWith('Su')) {
-            parent.appendChild(colHeaders[0]);
+    document.querySelectorAll('[data-baseweb="calendar"]').forEach(function(cal) {
+
+      // ── 1. Reorder column headers (Mo Tu We Th Fr Sa Su) ──
+      cal.querySelectorAll('[role="grid"]').forEach(function(grid) {
+        var headers = Array.from(grid.querySelectorAll('[role="columnheader"]'));
+        if (headers.length === 7 && headers[0].textContent.trim().startsWith('Su')) {
+          var parent = headers[0].parentNode;
+          parent.appendChild(headers[0]);   // move Sun to end
+        }
+      });
+
+      // ── 2. Reorder day cells in each week row ──────────────
+      cal.querySelectorAll('[role="row"]').forEach(function(row) {
+        if (_processed.has(row)) return;
+        var cells = Array.from(row.querySelectorAll('[role="gridcell"]'));
+        if (cells.length === 7 && !row.querySelector('[role="columnheader"]')) {
+          // Check if first cell is Sunday by aria-label
+          var first = cells[0];
+          var label = (first.getAttribute('aria-label') || '');
+          // Sunday = day-of-week index 0
+          var dateStr = first.querySelector('[data-value]') 
+                        ? first.querySelector('[data-value]').getAttribute('data-value') 
+                        : null;
+          if (!dateStr) {
+            // try to find a button with a date
+            var btn = first.querySelector('button');
+            if (btn) dateStr = btn.getAttribute('aria-label') || '';
+          }
+          // Parse and check if it's a Sunday
+          var d = dateStr ? new Date(dateStr) : null;
+          if (d && d.getDay() === 0) {
+            row.appendChild(cells[0]);
+            _processed.add(row);
           }
         }
       });
-      attempts++;
-      if (attempts > 40) clearInterval(interval);
-    }, 250);
+    });
+
+    // ── 3. Format date inputs as DD/MM/YYYY ───────────────────
+    document.querySelectorAll('[data-baseweb="base-input"] input[type="text"]').forEach(function(inp) {
+      if (inp.closest('[data-baseweb="calendar"]')) return;
+      if (inp.placeholder && inp.placeholder.includes('/')) return;
+      // Detect date inputs by their sibling calendar icon or parent
+      var wrapper = inp.closest('[data-testid]');
+      if (!wrapper) return;
+      var testid = wrapper.getAttribute('data-testid') || '';
+      if (testid.indexOf('stDateInput') === -1) return;
+
+      // Rewrite placeholder
+      if (inp.placeholder !== 'DD/MM/YYYY') {
+        inp.placeholder = 'DD/MM/YYYY';
+      }
+    });
   }
-  // Run on load and whenever Streamlit rerenders
-  document.addEventListener('DOMContentLoaded', fixCalendar);
+
   var obs = new MutationObserver(fixCalendar);
-  obs.observe(document.body, {childList: true, subtree: true});
+  obs.observe(document.body, { childList: true, subtree: true });
+  fixCalendar();
 })();
 </script>""", height=0)
 
@@ -674,29 +711,60 @@ for k, v in defaults.items():
         st.session_state[k] = v
 
 # ============================================================
-# PERSISTENT DEPARTURE CITY (localStorage)
+# PERSISTENT INSPIRE PREFERENCES (localStorage)
 # ============================================================
-# Inject a tiny JS component that reads localStorage on load and
-# writes it back whenever the departure city changes.
-# We use a hidden component to bridge JS → Python via query params.
+_stored_city      = st.query_params.get("home_city", "")
+_stored_budget    = st.query_params.get("pref_budget", "")
+_stored_group     = st.query_params.get("pref_group", "")
+_stored_transport = st.query_params.get("pref_transport", "")
+_stored_trip      = st.query_params.get("pref_trip", "")
+_stored_prios     = st.query_params.get("pref_prios", "")
+_stored_datemode  = st.query_params.get("pref_datemode", "")
+_stored_depart    = st.query_params.get("pref_depart", "")
+_stored_return    = st.query_params.get("pref_return", "")
 
-_stored_city = st.query_params.get("home_city", "")
-if _stored_city and not st.session_state.user_profile.get("starting_point"):
-    st.session_state.user_profile["starting_point"] = _stored_city
+_up = st.session_state.user_profile
+if _stored_city      and not _up.get("starting_point"):  _up["starting_point"]  = _stored_city
+if _stored_budget    and not _up.get("budget"):          _up["budget"]          = _stored_budget
+if _stored_group     and not _up.get("group_type"):      _up["group_type"]      = _stored_group
+if _stored_transport and not _up.get("transport_mode"):  _up["transport_mode"]  = _stored_transport
+if _stored_trip      and not _up.get("trip_type"):       _up["trip_type"]       = [t for t in _stored_trip.split(",") if t]
+if _stored_prios     and not _up.get("priorities"):      _up["priorities"]      = _stored_prios
 
-# JS that reads localStorage and sets the query param on first load
+if _stored_datemode and not st.session_state.get("travel_dates", {}).get("mode"):
+    try:
+        from datetime import date as _rdate
+        _td = {"mode": _stored_datemode}
+        if _stored_datemode == "specific":
+            if _stored_depart: _td["specific_depart"] = _rdate.fromisoformat(_stored_depart)
+            if _stored_return: _td["specific_return"] = _rdate.fromisoformat(_stored_return)
+        else:
+            _td["month"] = _stored_depart or "May"
+        st.session_state["travel_dates"] = _td
+    except Exception:
+        pass
+
 st.components.v1.html("""
 <script>
 (function() {
-  const saved = localStorage.getItem('sherpa_home_city');
-  if (saved) {
-    const url = new URL(window.parent.location.href);
-    if (url.searchParams.get('home_city') !== saved) {
-      url.searchParams.set('home_city', saved);
-      window.parent.history.replaceState({}, '', url.toString());
-      // Trigger Streamlit re-read of query params
-      window.parent.dispatchEvent(new Event('popstate'));
+  var keys = {
+    'sherpa_home_city': 'home_city', 'sherpa_budget': 'pref_budget',
+    'sherpa_group': 'pref_group', 'sherpa_transport': 'pref_transport',
+    'sherpa_trip': 'pref_trip', 'sherpa_prios': 'pref_prios',
+    'sherpa_datemode': 'pref_datemode', 'sherpa_depart': 'pref_depart',
+    'sherpa_return': 'pref_return'
+  };
+  var url = new URL(window.parent.location.href);
+  var changed = false;
+  Object.entries(keys).forEach(function([lsKey, qpKey]) {
+    var val = localStorage.getItem(lsKey);
+    if (val && url.searchParams.get(qpKey) !== val) {
+      url.searchParams.set(qpKey, val); changed = true;
     }
+  });
+  if (changed) {
+    window.parent.history.replaceState({}, '', url.toString());
+    window.parent.dispatchEvent(new Event('popstate'));
   }
 })();
 </script>
@@ -759,21 +827,6 @@ if st.session_state.active_tab == "Inspire":
                 placeholder="e.g. London, Manchester",
                 value=saved.get("starting_point", _stored_city or "")
             )
-            # Save to localStorage whenever the value changes
-            if starting_point:
-                st.components.v1.html(f"""
-<script>
-(function() {{
-  const city = {repr(starting_point)};
-  if (localStorage.getItem('sherpa_home_city') !== city) {{
-    localStorage.setItem('sherpa_home_city', city);
-    const url = new URL(window.parent.location.href);
-    url.searchParams.set('home_city', city);
-    window.parent.history.replaceState({{}}, '', url.toString());
-  }}
-}})();
-</script>
-""", height=0)
             st.markdown("**📅 When are you thinking of going?**")
             _saved_dates  = st.session_state.get("travel_dates", {})
             _date_mode    = st.radio(
@@ -801,6 +854,7 @@ if st.session_state.active_tab == "Inspire":
                     min_value=_today,
                     key="inspire_date_range",
                     label_visibility="collapsed",
+                    format="DD/MM/YYYY",
                 )
                 # Handle partial selection (user clicked first date only)
                 if isinstance(_date_range, (list, tuple)) and len(_date_range) == 2:
@@ -909,6 +963,46 @@ if st.session_state.active_tab == "Inspire":
         st.session_state.user_profile["specific_depart"] = st.session_state["travel_dates"].get("specific_depart")
         st.session_state.user_profile["specific_return"] = st.session_state["travel_dates"].get("specific_return")
 
+    # ── Persist all inspire fields to localStorage ────────────
+    _td_save    = st.session_state.get("travel_dates", {})
+    _dep_save   = _td_save.get("specific_depart") or _td_save.get("month","")
+    _ret_save   = _td_save.get("specific_return", "")
+    _dep_str    = _dep_save.isoformat() if hasattr(_dep_save, "isoformat") else str(_dep_save)
+    _ret_str    = _ret_save.isoformat() if hasattr(_ret_save, "isoformat") else str(_ret_save)
+    _trip_str   = ",".join(trip_type) if trip_type else ""
+    _prios_safe = user_priorities.replace("\n", " ").replace("'", "\'") if user_priorities else ""
+
+    if starting_point:
+        st.components.v1.html(f"""
+<script>
+(function() {{
+  var vals = {{
+    'sherpa_home_city':  {repr(starting_point)},
+    'sherpa_budget':     {repr(budget_per_person)},
+    'sherpa_group':      {repr(group_type)},
+    'sherpa_transport':  {repr(transport_mode)},
+    'sherpa_trip':       {repr(_trip_str)},
+    'sherpa_prios':      {repr(_prios_safe)},
+    'sherpa_datemode':   {repr(_td_save.get("mode",""))},
+    'sherpa_depart':     {repr(_dep_str)},
+    'sherpa_return':     {repr(_ret_str)}
+  }};
+  var url = new URL(window.parent.location.href);
+  var changed = false;
+  Object.entries(vals).forEach(function([k, v]) {{
+    if (v && localStorage.getItem(k) !== v) {{ localStorage.setItem(k, v); changed = true; }}
+  }});
+  if (changed) {{
+    Object.entries(vals).forEach(function([k, v]) {{
+      var qp = k.replace('sherpa_home_city','home_city').replace('sherpa_','pref_');
+      if (v) url.searchParams.set(qp, v);
+    }});
+    window.parent.history.replaceState({{}}, '', url.toString());
+  }}
+}})();
+</script>
+""", height=0)
+
     # ── Validate ───────────────────────────────────────────────
     _dest_pref_entered = bool(st.session_state.get("dest_preference", "").strip())
     if not starting_point:
@@ -973,7 +1067,7 @@ TRAVELLER PROFILE:
 - Departing from: {starting_point}
 - Travel dates: {
     (st.session_state.get("travel_dates",{}).get("specific_depart").strftime("%d %B") + " – " +
-     st.session_state.get("travel_dates",{}).get("specific_return").strftime("%d %B %Y"))
+     st.session_state.get("travel_dates",{}).get("specific_return").strftime("%d/%m/%Y"))
     if st.session_state.get("travel_dates",{}).get("mode") == "specific"
     else travel_month
 }
@@ -1237,7 +1331,7 @@ elif st.session_state.active_tab == "Book":
         if _has_specific:
             st.success(
                 f"📆 Using your selected dates: "
-                f"**{_default_depart.strftime('%a %d %b')} → {_default_return.strftime('%a %d %b %Y')}** "
+                f"**{_default_depart.strftime('%d/%m/%Y')} → {_default_return.strftime('%d/%m/%Y')}** "
                 f"— adjust below if needed"
             )
 
@@ -1249,6 +1343,7 @@ elif st.session_state.active_tab == "Book":
                 min_value=date.today(),
                 key="book_date_range",
                 label_visibility="collapsed",
+                format="DD/MM/YYYY",
             )
             if isinstance(_book_range, (list, tuple)) and len(_book_range) == 2:
                 depart_date, return_date = _book_range[0], _book_range[1]
@@ -1305,7 +1400,7 @@ elif st.session_state.active_tab == "Book":
     🤖 <strong>Sherpa has identified your route:</strong><br>
     ✈️ From <strong>{origin_city.title()}</strong> — airports: {origin_iata_str}<br>
     🛬 To <strong>{dest_city.title()}</strong> — {len(dest_airports)} airport option{"s" if len(dest_airports) > 1 else ""}: {airport_summary}<br>
-    📅 <strong>{depart_date.strftime("%a %d %b")} → {return_date.strftime("%a %d %b %Y")}</strong>
+    📅 <strong>{depart_date.strftime("%d/%m/%Y")} → {return_date.strftime("%d/%m/%Y")}</strong>
     &nbsp;· {int(num_adults)} passenger(s)
 </div>
 """, unsafe_allow_html=True)
@@ -1362,8 +1457,8 @@ elif st.session_state.active_tab == "Book":
                 '<div class="flight-link-card"><div>'
                 f'<div class="flight-link-title">✈️ {origin_city.title()} → {ap_name}</div>'
                 '<div class="flight-link-detail">'
-                f'{ap_iata} · {depart_date.strftime("%d %b")} outbound'
-                f' · {return_date.strftime("%d %b")} return'
+                f'{ap_iata} · {depart_date.strftime("%d/%m/%Y")} outbound'
+                f' · {return_date.strftime("%d/%m/%Y")} return'
                 f' · {adults_int} passenger(s)<br>'
                 f'{transfer_detail}{uk_detail}'
                 '</div></div>'
@@ -1435,9 +1530,9 @@ elif st.session_state.active_tab == "Book":
             expander_label = (
                 f"✅ Flights confirmed  ·  "
                 f"Arrive {fd.get('arrival_time','')} on "
-                f"{fd['outbound_date'].strftime('%a %d %b') if fd.get('outbound_date') else 'Friday'}"
+                f"{fd['outbound_date'].strftime('%d/%m/%Y') if fd.get('outbound_date') else 'Friday'}"
                 f"  ·  Depart {fd.get('depart_dest_time','')} on "
-                f"{fd['return_date'].strftime('%a %d %b') if fd.get('return_date') else 'Monday'}"
+                f"{fd['return_date'].strftime('%d/%m/%Y') if fd.get('return_date') else 'Monday'}"
             )
         else:
             expander_label = "✈️ Enter your arrival and departure times"
@@ -1466,44 +1561,38 @@ elif st.session_state.active_tab == "Book":
                 ob_date = st.date_input(
                     "Arrival date",
                     value=fd.get("outbound_date", depart_date),
-                    key="fd_ob_date"
+                    key="fd_ob_date",
+                    format="DD/MM/YYYY",
                 )
                 st.markdown('<div style="font-size:0.8rem;color:#8a9bb0;margin-bottom:4px">Arrival time (local)</div>', unsafe_allow_html=True)
                 _ob_h_def, _ob_m_def = _parse_time(fd.get("arrival_time", "11:30"))
-                _ob_tc1, _ob_tc2, _ob_tc3 = st.columns([2, 2, 3])
+                _ob_tc1, _ob_tc2 = st.columns([1, 1])
                 with _ob_tc1:
                     _ob_hour = st.selectbox("Hr", _hours, index=_hours.index(_ob_h_def),
                                             key="fd_ob_hour", label_visibility="collapsed")
                 with _ob_tc2:
                     _ob_min  = st.selectbox("Min", _mins, index=_mins.index(_ob_m_def),
                                             key="fd_ob_min",  label_visibility="collapsed")
-                with _ob_tc3:
-                    _ob_custom = st.text_input("Or type", value="",
-                                               placeholder="or type e.g. 11:45",
-                                               key="fd_ob_custom", label_visibility="collapsed")
-                ob_arrive = _ob_custom.strip() if _ob_custom.strip() else f"{_ob_hour}:{_ob_min}"
+                ob_arrive = f"{_ob_hour}:{_ob_min}"
 
             with fc2:
                 st.markdown("**🛫 Departing for home**")
                 ret_date = st.date_input(
                     "Departure date",
                     value=fd.get("return_date", return_date),
-                    key="fd_ret_date"
+                    key="fd_ret_date",
+                    format="DD/MM/YYYY",
                 )
                 st.markdown('<div style="font-size:0.8rem;color:#8a9bb0;margin-bottom:4px">Departure time (local)</div>', unsafe_allow_html=True)
                 _ret_h_def, _ret_m_def = _parse_time(fd.get("depart_dest_time", "14:00"))
-                _ret_tc1, _ret_tc2, _ret_tc3 = st.columns([2, 2, 3])
+                _ret_tc1, _ret_tc2 = st.columns([1, 1])
                 with _ret_tc1:
                     _ret_hour = st.selectbox("Hr", _hours, index=_hours.index(_ret_h_def),
                                              key="fd_ret_hour", label_visibility="collapsed")
                 with _ret_tc2:
                     _ret_min  = st.selectbox("Min", _mins, index=_mins.index(_ret_m_def),
                                              key="fd_ret_min",  label_visibility="collapsed")
-                with _ret_tc3:
-                    _ret_custom = st.text_input("Or type", value="",
-                                                placeholder="or type e.g. 18:45",
-                                                key="fd_ret_custom", label_visibility="collapsed")
-                ret_depart = _ret_custom.strip() if _ret_custom.strip() else f"{_ret_hour}:{_ret_min}"
+                ret_depart = f"{_ret_hour}:{_ret_min}"
 
             if st.button("✅ Save flight times"):
                 st.session_state.flight_details = {
@@ -1538,8 +1627,8 @@ elif st.session_state.active_tab == "Book":
                             {"name": "Europcar", "rating": "7.9", "highlight": "Local knowledge and flexible options"},
                         ],
                         "avoid": [
-                            {"name": "EasyRentCars", "reason": "Frequent hidden fees reported at this location"},
-                            {"name": "Goldcar",      "reason": "Aggressive upselling and poor customer service reviews"},
+                            {"name": "EasyRentCars", "rating": "4.8/10", "reason": "Frequent hidden fees reported at this location"},
+                            {"name": "Goldcar",      "rating": "5.1/10", "reason": "Aggressive upselling and poor customer service reviews"},
                         ]
                     }
                     try:
@@ -1558,7 +1647,7 @@ elif st.session_state.active_tab == "Book":
                             "Return ONLY valid JSON, no markdown:\n"
                             '{"rating": 4, "reasons": ["Short reason 1", "Short reason 2", "Short reason 3"], '
                             '"companies": [{"name": "Hertz", "rating": "8.5/10", "highlight": "Why they are good here"}], '
-                            '"avoid": [{"name": "BadCo", "reason": "Why to avoid them here"}]}'
+                            '"avoid": [{"name": "BadCo", "rating": "5.2/10", "reason": "Why to avoid them here"}]}'
                         )
                         _cr = claude_client.messages.create(
                             model="claude-sonnet-4-6",
@@ -1613,10 +1702,12 @@ elif st.session_state.active_tab == "Book":
                 with _yn1:
                     if st.button("✅  Yes", key="car_yes", use_container_width=True):
                         st.session_state["car_hire_confirmed"] = "yes"
+                        st.session_state.pop(f"_accom_tips_{dest_city.lower()}", None)
                         st.rerun()
                 with _yn2:
                     if st.button("✖  No", key="car_no", use_container_width=True):
                         st.session_state["car_hire_confirmed"] = "no"
+                        st.session_state.pop(f"_accom_tips_{dest_city.lower()}", None)
                         st.rerun()
 
             elif st.session_state.get("car_hire_confirmed") == "no":
@@ -1627,6 +1718,7 @@ elif st.session_state.active_tab == "Book":
                 )
                 if st.button("↩ Change answer", key="car_change_no"):
                     st.session_state["car_hire_confirmed"] = None
+                    st.session_state.pop(f"_accom_tips_{dest_city.lower()}", None)
                     st.rerun()
 
             # Only show the rest if user said Yes
@@ -1656,7 +1748,7 @@ elif st.session_state.active_tab == "Book":
                 _do_hour, _do_min = _parse_time(_dep_time)
                 _pu_time_str = f"{_pu_hour:02d}:{_pu_min:02d}" if _arr_time else "12:00"
                 _do_time_str = f"{_do_hour:02d}:{_do_min:02d}" if _dep_time else "12:00"
-                _car_dates   = f"{_car_depart.strftime('%d %b')} → {_car_return.strftime('%d %b')}"
+                _car_dates   = f"{_car_depart.strftime('%d/%m/%Y')} → {_car_return.strftime('%d/%m/%Y')}"
                 _times_note  = "· Times pre-filled from your flights" if _arr_time and _dep_time else "· Save your flight times above to pre-fill pickup &amp; dropoff times"
 
                 import urllib.parse as _ul
@@ -1721,7 +1813,8 @@ elif st.session_state.active_tab == "Book":
                         'text-transform:uppercase;margin-bottom:8px">🏆 Top rated at ' + dest_city + '</div>'
                         + _co_html +
                         '<div style="font-size:11px;color:#8a9bb0;margin-top:10px">'
-                        'All available to compare and book via Rentalcars above</div>'
+                        'All available to compare and book via Rentalcars above · '
+                        'Ratings based on Claude&#39;s knowledge of Google, TripAdvisor &amp; Trustpilot reviews</div>'
                         '</div>',
                         unsafe_allow_html=True
                     )
@@ -1733,20 +1826,23 @@ elif st.session_state.active_tab == "Book":
                     for _av in _cr_avoid[:2]:
                         _av_name   = _av.get("name", "")
                         _av_reason = _av.get("reason", "")
+                        _av_rating = str(_av.get("rating", ""))
                         _av_html += (
                             '<div style="display:flex;align-items:flex-start;gap:10px;padding:8px 0;'
                             'border-bottom:1px solid rgba(255,255,255,0.04)">'
                             '<div style="min-width:90px;font-weight:600;color:#e8e0d5;font-size:13px">' + _av_name + '</div>'
                             '<div style="flex:1;font-size:12px;color:#8a9bb0">' + _av_reason + '</div>'
-                            '<div style="min-width:32px;text-align:right;font-size:14px">⚠️</div>'
-                            '</div>'
+                            + ('<div style="min-width:52px;text-align:right;font-size:12px;color:#e07070;font-weight:600">⭐ ' + _av_rating + '</div>' if _av_rating else '')
+                            + '</div>'
                         )
                     st.markdown(
                         '<div style="background:rgba(231,76,60,0.04);border:1px solid rgba(231,76,60,0.2);'
                         'border-radius:10px;padding:14px 18px;margin:8px 0">'
                         '<div style="font-size:11px;font-weight:700;color:#e74c3c;letter-spacing:1px;'
-                        'text-transform:uppercase;margin-bottom:8px">⚠️ Worth avoiding at ' + dest_city + '</div>'
+                        'text-transform:uppercase;margin-bottom:8px">👎 Worth avoiding at ' + dest_city + '</div>'
                         + _av_html +
+                        '<div style="font-size:11px;color:#8a9bb0;margin-top:10px">'
+                        'Ratings based on Claude&#39;s knowledge of Google, TripAdvisor &amp; Trustpilot reviews</div>'
                         '</div>',
                         unsafe_allow_html=True
                     )
@@ -1754,6 +1850,7 @@ elif st.session_state.active_tab == "Book":
                 st.markdown("")
                 if st.button("↩ Change answer", key="car_change_yes"):
                     st.session_state["car_hire_confirmed"] = None
+                    st.session_state.pop(f"_accom_tips_{dest_city.lower()}", None)
                     st.rerun()
 
             st.markdown("")
@@ -1761,14 +1858,16 @@ elif st.session_state.active_tab == "Book":
         # ── Hotel Recommendations ───────────────────────────────
         st.markdown("### 🏨 Where to Stay")
         st.markdown(
-            "*Three options picked to match your budget and travel style. "
+            "*Areas and accommodation types to suit your budget and travel style. "
             "Click through to Booking.com to check live availability and prices.*"
         )
 
         # Get flight dates for the booking link
-        fld_h        = st.session_state.flight_details
-        h_checkin    = fld_h.get("outbound_date", depart_date)
-        h_checkout   = fld_h.get("return_date",   return_date)
+        # Use confirmed flight dates if saved, otherwise fall back to live date picker
+        fld_h     = st.session_state.flight_details
+        _fd_confirmed = fld_h.get("confirmed", False)
+        h_checkin  = fld_h.get("outbound_date") if _fd_confirmed and fld_h.get("outbound_date") else depart_date
+        h_checkout = fld_h.get("return_date")   if _fd_confirmed and fld_h.get("return_date")   else return_date
         h_checkin_s  = h_checkin.strftime("%Y-%m-%d")  if hasattr(h_checkin,  "strftime") else depart_date.strftime("%Y-%m-%d")
         h_checkout_s = h_checkout.strftime("%Y-%m-%d") if hasattr(h_checkout, "strftime") else return_date.strftime("%Y-%m-%d")
         h_adults     = int(num_adults)
@@ -1795,7 +1894,7 @@ elif st.session_state.active_tab == "Book":
                                              h_adults, h_rooms, bk_aid)
         _h_date_range = ""
         if hasattr(h_checkin, "strftime") and hasattr(h_checkout, "strftime"):
-            _h_date_range = f" · {h_checkin.strftime('%d %b')} – {h_checkout.strftime('%d %b')}"
+            _h_date_range = f" · {h_checkin.strftime('%d/%m/%Y')} – {h_checkout.strftime('%d/%m/%Y')}"
         st.markdown(
             f'<a href="{_all_hotels_url}" target="_blank" style="' +
             f'display:block;text-align:center;background:#003580;color:#fff;' +
@@ -1811,142 +1910,126 @@ elif st.session_state.active_tab == "Book":
             unsafe_allow_html=True
         )
 
-        # Generate area-based accommodation guide (cached in session state)
-        if st.session_state.get("hotel_results") is None:
-            with st.spinner("Finding the best areas to stay..."):
+        # ── Accommodation tips ────────────────────────────────
+        _accom_tips_key = f"_accom_tips_{dest_city.lower()}"
+        if not st.session_state.get(_accom_tips_key):
+            with st.spinner("Putting together accommodation tips..."):
                 try:
-                    nights   = (h_checkout - h_checkin).days if hasattr(h_checkin, "strftime") else 3
-                    budget   = profile.get("budget", "££ — Mid-range")
-                    group    = profile.get("group_type", "Couple")
-                    pref     = profile.get("priorities", "")
-                    trip_t   = " / ".join(profile.get("trip_type", ["City Break"]))
+                    _at_budget  = profile.get("budget", "££ — Mid-range")
+                    _at_group   = profile.get("group_type", "Couple")
+                    _at_pref    = profile.get("priorities", "")
+                    _at_ttype   = " / ".join(profile.get("trip_type", [])) or "general"
+                    _at_car     = st.session_state.get("car_hire_confirmed")
 
-                    hotel_prompt = f"""You are a local accommodation expert advising a UK traveller on where to stay in {dest}.
+                    _at_car_context = (
+                        "HIRING A CAR: Yes — they will collect it at the airport on arrival and drive throughout the trip. "
+                        "This means: (1) proximity to central transport links matters less — they can stay slightly outside the centre; "
+                        "(2) parking availability and cost is critical — flag areas where parking is difficult or expensive; "
+                        "(3) areas that would normally require a car to explore become accessible. "
+                        "Mention parking specifically in at least one booking tip."
+                        if _at_car == "yes" else
+                        "NOT HIRING A CAR: They are relying entirely on public transport, taxis or walking. "
+                        "This means: (1) staying central or near good metro/bus links is essential — prioritise walkable areas; "
+                        "(2) avoid recommending areas that are awkward to reach without a car; "
+                        "(3) mention specific transport links (metro line, tram, bus) for each area where relevant. "
+                        "At least one booking tip must address getting around without a car."
+                        if _at_car == "no" else
+                        "Car hire status unknown — give balanced advice covering both walkability and transport links."
+                    )
 
-TRIP DETAILS:
-- Destination: {dest}
-- Dates: {h_checkin_s} to {h_checkout_s} ({nights} nights)
-- Budget: {budget}
-- Travelling as: {group}
-- Trip type: {trip_t}
-- Interests: {pref or "no specific preferences"}
+                    _at_prompt = f"""You are a local expert giving a UK traveller practical advice on where to stay in {dest}.
 
-Give practical, honest advice on where to stay. Return ONLY valid JSON, no other text:
+TRIP PROFILE:
+- Budget: {_at_budget}
+- Travelling as: {_at_group}
+- Trip type: {_at_ttype}
+- Interests / priorities: {_at_pref or "no specific preferences"}
+
+TRANSPORT: {_at_car_context}
+
+Give 3 short, specific area recommendations and 3 practical booking tips, all tailored to this exact traveller.
+The transport situation above must shape both the area recommendations AND the booking tips — do not give generic advice.
+Return ONLY valid JSON, no other text:
 {{
   "areas": [
     {{
-      "name": "Neighbourhood or area name",
-      "vibe": "2-4 word character description e.g. Lively and central",
-      "best_for": "Who this suits e.g. First-timers, nightlife lovers, families",
-      "description": "2 sentences on what it's like to stay here and why it works for this traveller",
-      "accommodation_types": ["Hotel", "Boutique Hotel", "Apartment"],
-      "price_range": "approx £X–£X per night",
-      "tip": "One insider tip about staying in this area — transport, noise, hidden gem nearby"
+      "name": "Real neighbourhood name",
+      "vibe": "3-5 word character summary",
+      "best_for": "Who this suits",
+      "price_range": "approx £X-£X per night",
+      "tip": "One specific insider tip about staying here, accounting for whether they have a car"
     }}
   ],
-  "general_tips": [
-    "Tip 1 about booking accommodation for this destination",
-    "Tip 2 about what to watch out for or look for",
-    "Tip 3 about transport or location considerations"
+  "booking_tips": [
+    "Tip 1 — must directly reference their transport situation (car/no car)",
+    "Tip 2 relevant to their budget and group type",
+    "Tip 3 about what to watch out for or prioritise when booking"
   ],
-  "avoid": "One short sentence on areas or accommodation types to avoid and why"
+  "avoid": "One sentence on what to avoid, relevant to their transport situation and budget"
 }}
 
-Include 3 areas, varied by character and price. Be specific to {dest} — use real neighbourhood names."""
+Be specific to {dest_city} — use real neighbourhood names. Tailor every point to the {_at_budget} budget, {_at_group} group type, and their transport situation."""
 
-                    hotel_resp = claude_client.messages.create(
-                        model="claude-sonnet-4-6",
-                        max_tokens=1500,
-                        messages=[{"role": "user", "content": hotel_prompt}]
+                    _at_resp = claude_client.messages.create(
+                        model="claude-haiku-4-5-20251001",
+                        max_tokens=800,
+                        messages=[{"role": "user", "content": _at_prompt}]
                     )
-                    import json as _hj, re as _hre
-                    raw_h   = hotel_resp.content[0].text.strip()
-                    match_h = _hre.search(r"\{.*\}", raw_h, _hre.DOTALL)
-                    if match_h:
-                        st.session_state.hotel_results = _hj.loads(match_h.group())
+                    import json as _atj, re as _atre
+                    _at_raw   = _at_resp.content[0].text.strip()
+                    _at_match = _atre.search(r"\{.*\}", _at_raw, _atre.DOTALL)
+                    if _at_match:
+                        st.session_state[_accom_tips_key] = _atj.loads(_at_match.group())
                     else:
-                        st.session_state.hotel_results = {}
-                except Exception as e:
-                    st.session_state.hotel_results = {}
-                    st.warning(f"Could not load accommodation guide: {e}")
+                        st.session_state[_accom_tips_key] = {}
+                except Exception:
+                    st.session_state[_accom_tips_key] = {}
 
-        # Guard against old list-format cache from previous version
-        _raw_h_res = st.session_state.get("hotel_results")
-        if isinstance(_raw_h_res, list):
-            st.session_state.hotel_results = None
-            st.rerun()
-        _h_guide = _raw_h_res if isinstance(_raw_h_res, dict) else {}
-        _h_areas = _h_guide.get("areas", [])
-        _h_tips  = _h_guide.get("general_tips", [])
-        _h_avoid = _h_guide.get("avoid", "")
+        _at_data  = st.session_state.get(_accom_tips_key) or {}
+        _at_areas = _at_data.get("areas", [])
+        _at_tips  = _at_data.get("booking_tips", [])
+        _at_avoid = _at_data.get("avoid", "")
 
-        if _h_areas:
-            st.markdown(
-                '<div style="font-size:0.7rem;color:#5f7080;letter-spacing:2px;' +
-                'text-transform:uppercase;margin-bottom:14px">Where to stay</div>',
-                unsafe_allow_html=True
-            )
-
-            _type_icons_h = {
-                "Hotel": "🏨", "Boutique Hotel": "🛎️", "Apartment": "🏠",
-                "Hostel": "🛏️", "B&B": "☕", "Guesthouse": "🏡", "Villa": "🌿",
-                "Resort": "🌴", "Airbnb": "🏠",
-            }
-
-            for _ha in _h_areas:
-                _ha_name   = _ha.get("name", "")
-                _ha_vibe   = _ha.get("vibe", "")
-                _ha_for    = _ha.get("best_for", "")
-                _ha_desc   = _ha.get("description", "")
-                _ha_types  = _ha.get("accommodation_types", [])
-                _ha_price  = _ha.get("price_range", "")
-                _ha_tip    = _ha.get("tip", "")
-
-                _types_html = " ".join(
-                    f'<span style="background:rgba(201,168,76,0.1);color:#c9a84c;' +
-                    f'font-size:10px;padding:2px 8px;border-radius:20px;margin-right:4px">' +
-                    f'{_type_icons_h.get(t,"🏨")} {t}</span>'
-                    for t in _ha_types
-                )
-
-                # Area-specific Booking.com search link
-                import urllib.parse as _hup
-                _ha_bk_url = booking_search_url(f"{_ha_name} {dest_city}", h_checkin_s,
-                                                h_checkout_s, h_adults, h_rooms, bk_aid)
-
+        if _at_areas or _at_tips:
+            # Area pills
+            if _at_areas:
+                _at_areas_html = ""
+                for _ata in _at_areas:
+                    _at_areas_html += (
+                        f'<div style="background:rgba(15,25,35,0.5);border:1px solid rgba(255,255,255,0.08);'
+                        f'border-radius:10px;padding:14px 16px;margin-bottom:10px">'
+                        f'<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">'
+                        f'<span style="font-size:0.9rem;font-weight:700;color:#e8e0d5">{_ata.get("name","")}</span>'
+                        f'<span style="font-size:0.75rem;color:#c9a84c;font-weight:600">{_ata.get("price_range","")}</span>'
+                        f'</div>'
+                        f'<div style="font-size:0.75rem;color:#c9a84c;margin-bottom:4px">{_ata.get("vibe","")} · Best for: {_ata.get("best_for","")}</div>'
+                        f'<div style="font-size:0.8rem;color:#a8b8c8">💡 {_ata.get("tip","")}</div>'
+                        f'</div>'
+                    )
                 st.markdown(
-                    f'<div style="background:rgba(15,25,35,0.5);border:1px solid rgba(255,255,255,0.08);' +
-                    f'border-radius:12px;padding:18px 20px;margin-bottom:12px">' +
-                    f'<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;margin-bottom:10px">' +
-                    f'<div>' +
-                    f'<div style="font-size:1rem;font-weight:700;color:#e8e0d5;margin-bottom:3px">{_ha_name}</div>' +
-                    f'<div style="font-size:0.78rem;color:#c9a84c;margin-bottom:2px">{_ha_vibe}</div>' +
-                    f'<div style="font-size:0.75rem;color:#5f7080">Best for: {_ha_for}</div>' +
-                    f'</div>' +
-                    f'<div style="font-size:0.85rem;font-weight:600;color:#e8e0d5;white-space:nowrap">{_ha_price}</div>' +
-                    f'</div>' +
-                    f'<div style="font-size:0.83rem;color:#a8b8c8;line-height:1.6;margin-bottom:10px">{_ha_desc}</div>' +
-                    f'<div style="margin-bottom:10px">{_types_html}</div>' +
-                    (f'<div style="background:rgba(201,168,76,0.06);border-left:2px solid #c9a84c;' +
-                     f'padding:8px 12px;border-radius:0 6px 6px 0;font-size:0.78rem;color:#a8b8c8;' +
-                     f'margin-bottom:12px">💡 {_ha_tip}</div>' if _ha_tip else '') +
-                    f'<a href="{_ha_bk_url}" target="_blank" ' +
-                    f'style="font-size:0.78rem;color:#c9a84c;text-decoration:none;font-weight:600">' +
-                    f'Search {_ha_name} on Booking.com →</a>' +
-                    f'</div>',
+                    '<div style="font-size:10px;font-weight:700;color:#5f7080;letter-spacing:1.5px;'
+                    'text-transform:uppercase;margin-bottom:10px">Areas to consider</div>'
+                    + _at_areas_html,
                     unsafe_allow_html=True
                 )
 
-            if _h_tips or _h_avoid:
+            # Tips + avoid panel
+            if _at_tips or _at_avoid:
+                _tips_rows = "".join(
+                    f'<div style="font-size:0.82rem;color:#a8b8c8;padding:5px 0;'
+                    f'border-bottom:1px solid rgba(255,255,255,0.04)">✓ {t}</div>'
+                    for t in _at_tips
+                )
+                _avoid_row = (
+                    f'<div style="font-size:0.82rem;color:#e07070;padding:6px 0;margin-top:4px">⚠️ {_at_avoid}</div>'
+                    if _at_avoid else ""
+                )
                 st.markdown(
-                    '<div style="background:rgba(15,25,35,0.4);border:1px solid rgba(255,255,255,0.06);' +
-                    'border-radius:12px;padding:16px 20px;margin-top:4px">' +
-                    '<div style="font-size:10px;font-weight:700;color:#5f7080;letter-spacing:1.5px;' +
-                    'text-transform:uppercase;margin-bottom:10px">Booking tips</div>' +
-                    "".join(f'<div style="font-size:0.82rem;color:#a8b8c8;padding:4px 0;border-bottom:' +
-                            f'1px solid rgba(255,255,255,0.04)">✓ {t}</div>' for t in _h_tips) +
-                    (f'<div style="font-size:0.82rem;color:#e07070;padding:6px 0;margin-top:4px">' +
-                     f'⚠️ {_h_avoid}</div>' if _h_avoid else '') +
+                    '<div style="background:rgba(15,25,35,0.4);border:1px solid rgba(255,255,255,0.06);'
+                    'border-radius:10px;padding:14px 18px;margin-bottom:16px">'
+                    '<div style="font-size:10px;font-weight:700;color:#5f7080;letter-spacing:1.5px;'
+                    'text-transform:uppercase;margin-bottom:10px">Booking tips</div>'
+                    + _tips_rows + _avoid_row +
                     '</div>',
                     unsafe_allow_html=True
                 )
@@ -1962,10 +2045,51 @@ Include 3 areas, varied by character and price. Be specific to {dest} — use re
             key="accom_custom_only"
         )
         if _custom_hotel.strip() != _saved_hotel:
+            # Clear old hotel note so new one generates for updated name
+            if _saved_hotel:
+                _old_note_key = f"_hotel_note_{_saved_hotel.lower().replace(' ','_')[:40]}"
+                st.session_state.pop(_old_note_key, None)
             st.session_state.selected_hotel = _custom_hotel.strip()
 
         if st.session_state.get("selected_hotel"):
             st.success(f"✅ Staying at: **{st.session_state.selected_hotel}**")
+
+            # ── Hotel note ────────────────────────────────────────
+            _hotel_note_key = f"_hotel_note_{st.session_state.selected_hotel.lower().replace(' ','_')[:40]}"
+            if not st.session_state.get(_hotel_note_key):
+                with st.spinner("Looking up your accommodation..."):
+                    try:
+                        _hn_car  = st.session_state.get("car_hire_confirmed")
+                        _hn_pref = profile.get("priorities", "")
+                        _hn_grp  = profile.get("group_type", "Couple")
+                        _hn_prompt = (
+                            f"Give a short, honest briefing on '{st.session_state.selected_hotel}' in {dest_city} "
+                            f"for a {_hn_grp} traveller {'with a hire car' if _hn_car == 'yes' else 'using public transport'}.\n\n"
+                            f"Cover in 3-4 sentences: what neighbourhood it's in and what that's like, "
+                            f"how well-located it is for the main sights, "
+                            f"{'parking situation' if _hn_car == 'yes' else 'nearest transport links'}, "
+                            f"and one relevant pro or con for this type of traveller"
+                            + (f" who is interested in {_hn_pref}" if _hn_pref else "") + ". "
+                            f"If you don't recognise the specific property, describe the area based on what they've typed. "
+                            f"Be concise and practical — no fluff."
+                        )
+                        _hn_resp = claude_client.messages.create(
+                            model="claude-haiku-4-5-20251001",
+                            max_tokens=200,
+                            messages=[{"role": "user", "content": _hn_prompt}]
+                        )
+                        st.session_state[_hotel_note_key] = _hn_resp.content[0].text.strip()
+                    except Exception:
+                        st.session_state[_hotel_note_key] = ""
+
+            _hn_text = st.session_state.get(_hotel_note_key, "")
+            if _hn_text:
+                st.markdown(
+                    f'<div style="background:rgba(15,25,35,0.4);border-left:3px solid #c9a84c;'
+                    f'border-radius:0 8px 8px 0;padding:12px 16px;margin:8px 0 4px;'
+                    f'font-size:0.83rem;color:#a8b8c8;line-height:1.6">{_hn_text}</div>',
+                    unsafe_allow_html=True
+                )
 
         st.markdown("---")
 
@@ -2116,7 +2240,7 @@ TRAVELLER PROFILE:
 - Departing from: {origin_city or 'UK'}
 - Travel dates: {
     (st.session_state.get("travel_dates",{}).get("specific_depart").strftime("%d %B") + " – " +
-     st.session_state.get("travel_dates",{}).get("specific_return").strftime("%d %B %Y"))
+     st.session_state.get("travel_dates",{}).get("specific_return").strftime("%d/%m/%Y"))
     if st.session_state.get("travel_dates",{}).get("mode") == "specific"
     else travel_month
 }
@@ -2727,7 +2851,6 @@ elif st.session_state.active_tab == "Support":
     _s_dest     = st.session_state.get("chosen_destination") or ""
     _s_profile  = st.session_state.get("user_profile") or {}
     _s_flights  = st.session_state.get("flight_details") or {}
-    _s_hotels   = st.session_state.get("hotel_results") or []
     _s_hotel    = st.session_state.get("selected_hotel") or ""
     _s_car      = st.session_state.get("car_hire_confirmed")
     _s_car_data = st.session_state.get("car_hire_rating") or {}
@@ -2746,7 +2869,7 @@ elif st.session_state.active_tab == "Support":
         _s_dep_t    = _s_flights.get("depart_dest_time", "")
         _s_nights   = ((_s_return - _s_depart).days if _s_depart and _s_return and hasattr(_s_depart, "strftime") else None)
         _s_date_str = (
-            f"{_s_depart.strftime('%a %d %b')} to {_s_return.strftime('%a %d %b %Y')}"
+            f"{_s_depart.strftime('%d/%m/%Y')} to {_s_return.strftime('%d/%m/%Y')}"
             if _s_depart and hasattr(_s_depart, "strftime") else
             _s_dates.get("month", "Dates not set")
         )
@@ -2793,8 +2916,7 @@ elif st.session_state.active_tab == "Support":
             )
         with _sc2:
             _h_colour = "#4caf7d" if _s_hotel else "#8a9bb0"
-            _h_names  = [h.get("name","") for h in _s_hotels if h.get("name")]
-            _h_detail = ("Options: " + ", ".join(_h_names[:3])) if _h_names and not _s_hotel else ("" if _s_hotel else "Go to Book tab to see hotel options")
+            _h_detail = "" if _s_hotel else "Enter your accommodation in the Book tab"
             st.markdown(
                 '<div style="background:rgba(15,25,35,0.5);border:1px solid rgba(255,255,255,0.08);' +
                 'border-radius:10px;padding:16px;margin-bottom:12px">' +
