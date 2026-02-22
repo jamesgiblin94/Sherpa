@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
+import { saveTrip } from '../utils/supabase'
 import ReactMarkdown from 'react-markdown'
+import ItineraryModal from './ItineraryModal'
 import DatePicker from 'react-datepicker'
 import { api } from '../utils/api'
 import SherpaSpinner from './SherpaSpinner'
@@ -214,13 +216,23 @@ function CarHireSection({ prefs, dest, flightDetails, carHire, setCarHire }) {
   const d = carHire.data || {}
   const score = d.rating || 3
 
+  // Build Rentalcars URL from flight dates
+  const rcUrl = (() => {
+    const dep = flightDetails?.outboundDate
+    const ret = flightDetails?.returnDate
+    const params = new URLSearchParams({ pickup: dest?.CITY || '' })
+    if (dep) params.set('puDate', dep)
+    if (ret) params.set('doDate', ret)
+    return `https://www.rentalcars.com/en/?${params.toString()}`
+  })()
+
   return (
     <div className="space-y-4">
       {loading && <div className="card"><SherpaSpinner messages={['Checking car hire options…','Comparing rental companies…','Reading the reviews…']} /></div>}
 
       {!loading && carHire.data && (
         <>
-          {/* Rating card */}
+          {/* 1. Rating card */}
           <div className="card-gold">
             <div className="flex items-center gap-3 mb-3">
               <div className="text-2xl">{'🚗'.repeat(score)}{'○'.repeat(5-score)}</div>
@@ -234,44 +246,7 @@ function CarHireSection({ prefs, dest, flightDetails, carHire, setCarHire }) {
             </ul>
           </div>
 
-          {/* Companies */}
-          {d.companies?.length > 0 && (
-            <div className="card">
-              <h4 className="text-sm font-semibold text-slate mb-3">✅ Recommended companies</h4>
-              <div className="space-y-2">
-                {d.companies.map((c,i) => (
-                  <div key={i} className="flex items-center justify-between py-2 border-b border-white/8 last:border-0">
-                    <div>
-                      <p className="text-sm font-medium text-slate">{c.name}</p>
-                      <p className="text-xs text-slate-3">{c.highlight}</p>
-                    </div>
-                    <span className="badge">{c.rating}</span>
-                  </div>
-                ))}
-              </div>
-              {d.rentalcars_url && (
-                <a href={d.rentalcars_url} target="_blank" rel="noopener noreferrer"
-                   className="btn-primary block text-center mt-4 w-full">
-                  Compare prices on Rentalcars →
-                </a>
-              )}
-            </div>
-          )}
-
-          {/* Avoid */}
-          {d.avoid?.length > 0 && (
-            <div className="card border-red-400/20">
-              <h4 className="text-sm font-semibold text-red-400 mb-2">⚠️ Worth avoiding</h4>
-              {d.avoid.map((c,i) => (
-                <div key={i} className="text-sm text-slate-3 flex gap-2 mt-1">
-                  <span className="text-red-400">✗</span>
-                  <span><strong className="text-slate">{c.name}</strong> ({c.rating}) — {c.reason}</span>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Yes/No */}
+          {/* 2. Yes/No toggle */}
           {carHire.confirmed === null && (
             <div className="card text-center">
               <p className="text-sm text-slate mb-3">Will you hire a car for this trip?</p>
@@ -290,6 +265,45 @@ function CarHireSection({ prefs, dest, flightDetails, carHire, setCarHire }) {
               </button>
             </div>
           )}
+
+          {/* 3. Rentalcars + recommendations — only show when yes confirmed */}
+          {carHire.confirmed === 'yes' && (
+            <>
+              <a href={rcUrl} target="_blank" rel="noopener noreferrer"
+                 className="btn-primary block text-center w-full">
+                🚗 Compare prices on Rentalcars →
+              </a>
+
+              {d.companies?.length > 0 && (
+                <div className="card">
+                  <h4 className="text-sm font-semibold text-slate mb-3">✅ Recommended companies</h4>
+                  <div className="space-y-2">
+                    {d.companies.map((c,i) => (
+                      <div key={i} className="flex items-center justify-between py-2 border-b border-white/8 last:border-0">
+                        <div>
+                          <p className="text-sm font-medium text-slate">{c.name}</p>
+                          <p className="text-xs text-slate-3">{c.highlight}</p>
+                        </div>
+                        <span className="badge">{c.rating}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {d.avoid?.length > 0 && (
+                <div className="card" style={{border:'1px solid rgba(248,113,113,0.2)'}}>
+                  <h4 className="text-sm font-semibold text-red-400 mb-2">⚠️ Worth avoiding</h4>
+                  {d.avoid.map((c,i) => (
+                    <div key={i} className="text-sm text-slate-3 flex gap-2 mt-1">
+                      <span className="text-red-400">✗</span>
+                      <span><strong className="text-slate">{c.name}</strong> ({c.rating}) — {c.reason}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
         </>
       )}
     </div>
@@ -298,16 +312,26 @@ function CarHireSection({ prefs, dest, flightDetails, carHire, setCarHire }) {
 
 // ── Accommodation section ────────────────────────────────────────────────────
 
-function AccomSection({ prefs, dest, carHire, selectedHotel, setSelectedHotel }) {
+function AccomSection({ prefs, dest, carHire, selectedHotel, setSelectedHotel, flightDetails }) {
   const [tips,    setTips]    = useState(null)
   const [note,    setNote]    = useState('')
   const [loading, setLoading] = useState(false)
   const [noteLoading, setNoteLoading] = useState(false)
   const [hotelInput, setHotelInput]   = useState(selectedHotel)
 
-  const bkUrl = dest
-    ? `https://www.booking.com/searchresults.html?ss=${encodeURIComponent(dest.CITY)}&lang=en-gb&aid=${304142}`
-    : '#'
+  const bkUrl = (() => {
+    if (!dest) return '#'
+    const params = new URLSearchParams({
+      ss:           dest.CITY,
+      lang:         'en-gb',
+      // aid: '304142', // add when Booking.com affiliate approved
+      group_adults: prefs.numAdults || 2,
+      no_rooms:     1,
+    })
+    if (flightDetails?.outboundDate) params.set('checkin',  flightDetails.outboundDate)
+    if (flightDetails?.returnDate)   params.set('checkout', flightDetails.returnDate)
+    return `https://www.booking.com/searchresults.html?${params.toString()}`
+  })()
 
   useEffect(() => {
     if (!dest || tips) return
@@ -393,10 +417,19 @@ function AccomSection({ prefs, dest, carHire, selectedHotel, setSelectedHotel })
           <input className="input flex-1" placeholder="Enter hotel or area…"
             value={hotelInput}
             onChange={e => setHotelInput(e.target.value)}
-            onBlur={() => { setSelectedHotel(hotelInput); lookupHotel(hotelInput) }}
             onKeyDown={e => { if (e.key === 'Enter') { setSelectedHotel(hotelInput); lookupHotel(hotelInput) }}}
           />
+          <button
+            className="btn-secondary px-3 text-sm whitespace-nowrap"
+            onClick={() => { setSelectedHotel(hotelInput); lookupHotel(hotelInput) }}
+            disabled={!hotelInput.trim() || noteLoading}
+          >
+            {noteLoading ? '…' : 'Look up'}
+          </button>
         </div>
+        {selectedHotel && !noteLoading && !note && (
+          <p className="text-xs text-slate-3 mt-1.5">✓ {selectedHotel}</p>
+        )}
         {noteLoading && <p className="text-sm text-slate-3 mt-2 italic">Looking up your accommodation…</p>}
         {note && !noteLoading && (
           <div className="note mt-3">{note}</div>
@@ -408,13 +441,16 @@ function AccomSection({ prefs, dest, carHire, selectedHotel, setSelectedHotel })
 
 // ── Itinerary section ────────────────────────────────────────────────────────
 
-function ItinerarySection({ prefs, dest, flightDetails, carHire, selectedHotel, itinerary, setItinerary }) {
-  const [loading,  setLoading]  = useState(false)
-  const [feedback, setFeedback] = useState('')
-  const [tweaking, setTweaking] = useState(false)
+function ItinerarySection({ prefs, dest, flightDetails, carHire, selectedHotel, itinerary, setItinerary, user, onSaveTrip }) {
+  const [loading,    setLoading]    = useState(false)
+  const [feedback,   setFeedback]   = useState('')
+  const [tweaking,   setTweaking]   = useState(false)
   const [activities, setActivities] = useState(null)
-  const [mapPins,   setMapPins]    = useState(null)
-  const [showMap,   setShowMap]    = useState(false)
+  const [mapPins,    setMapPins]    = useState(null)
+  const [showMap,    setShowMap]    = useState(false)
+  const [saving,     setSaving]     = useState(false)
+  const [saved,      setSaved]      = useState(false)
+  const [showModal,  setShowModal]  = useState(false)
 
   const buildItinerary = async () => {
     if (!dest) return
@@ -446,6 +482,7 @@ function ItinerarySection({ prefs, dest, flightDetails, carHire, selectedHotel, 
       setItinerary('Something went wrong. Please try again.')
     } finally {
       setLoading(false)
+      setShowModal(true)
     }
   }
 
@@ -482,10 +519,35 @@ function ItinerarySection({ prefs, dest, flightDetails, carHire, selectedHotel, 
     } catch {}
   }
 
+  const handleSave = async () => {
+    if (!user || !itinerary) return
+    setSaving(true)
+    try {
+      await saveTrip({
+        destination:   dest.CITY,
+        country:       dest.COUNTRY,
+        emoji:         dest.EMOJI,
+        itinerary,
+        flightDetails,
+        carHire,
+        hotel:         selectedHotel,
+        prefs,
+      })
+      setSaved(true)
+      setTimeout(() => setSaved(false), 3000)
+      if (onSaveTrip) onSaveTrip()
+    } catch (e) {
+      alert('Could not save trip: ' + e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   if (!dest) return null
 
   return (
     <div className="space-y-4">
+      {/* Build button */}
       <button
         className="btn-primary w-full py-3 text-base"
         onClick={buildItinerary}
@@ -494,51 +556,69 @@ function ItinerarySection({ prefs, dest, flightDetails, carHire, selectedHotel, 
         🗓️ {itinerary ? 'Rebuild' : 'Build'} My Full Plan
       </button>
 
-      {loading && (
-        <div className="card">
-          <SherpaSpinner messages={[
-            'Building your itinerary…',
-            'Planning the perfect first morning…',
-            'Finding the hidden gems…',
-            'Checking opening times…',
-            'Plotting the best route…',
-            'One more thing to add…',
-            'Final checks…',
-          ]} />
-        </div>
+      {/* Open modal button if itinerary already exists */}
+      {itinerary && !loading && (
+        <button
+          className="btn-secondary w-full text-sm"
+          onClick={() => setShowModal(true)}
+        >
+          📖 View Itinerary
+        </button>
       )}
 
-      {itinerary && (
-        <div className="card prose prose-invert prose-sm max-w-none
-          prose-headings:font-serif prose-headings:text-gold-light
-          prose-strong:text-slate prose-p:text-slate prose-li:text-slate
-          prose-hr:border-white/10">
-          <ReactMarkdown>{itinerary}</ReactMarkdown>
-        </div>
+      {/* Itinerary modal */}
+      {showModal && (
+        <ItineraryModal
+          itinerary={itinerary}
+          dest={dest}
+          destData={dest}
+          prefs={prefs}
+          flightDetails={flightDetails}
+          selectedHotel={selectedHotel}
+          feedback={feedback}
+          setFeedback={setFeedback}
+          onTweak={handleTweak}
+          tweaking={tweaking}
+          onSave={handleSave}
+          saving={saving}
+          saved={saved}
+          user={user}
+          activities={activities}
+          fetchActivities={fetchActivities}
+          skyscannerUrl={flightDetails.confirmed && flightDetails.selectedAirport
+            ? (() => {
+                const ap = flightDetails.selectedAirport
+                const depart = flightDetails.outboundDate
+                const ret    = flightDetails.returnDate
+                const yymmdd = (iso) => iso ? iso.replace(/-/g,'').slice(2) : ''
+                const originSky = prefs.startingPoint?.match(/\(([A-Z]{3})\)/)?.[1]?.toLowerCase() || 'lon'
+                if (!depart || !ret) return '#'
+                return `https://www.skyscanner.net/transport/flights/${originSky}/${(ap.sky||ap.iata||'').toLowerCase()}/${yymmdd(depart)}/${yymmdd(ret)}/?adults=${prefs.numAdults}`
+              })()
+            : null}
+          bookingUrl={(() => {
+            if (!dest) return null
+            const params = new URLSearchParams({ ss: dest.CITY, lang: 'en-gb', group_adults: prefs.numAdults || 2, no_rooms: 1 })
+            if (flightDetails?.outboundDate) params.set('checkin', flightDetails.outboundDate)
+            if (flightDetails?.returnDate)   params.set('checkout', flightDetails.returnDate)
+            return `https://www.booking.com/searchresults.html?${params.toString()}`
+          })()}
+          carHireUrl={(() => {
+            const dep = flightDetails?.outboundDate
+            const ret = flightDetails?.returnDate
+            const params = new URLSearchParams({ pickup: dest?.CITY || '' })
+            if (dep) params.set('puDate', dep)
+            if (ret) params.set('doDate', ret)
+            return `https://www.rentalcars.com/en/?${params.toString()}`
+          })()}
+          onClose={() => setShowModal(false)}
+        />
       )}
 
+      {/* Keep old action buttons outside modal for map */}
       {itinerary && !loading && (
         <>
-          {/* Tweak box */}
-          <div className="card">
-            <label className="label">✏️ Request changes</label>
-            <div className="flex gap-2">
-              <input className="input flex-1" placeholder="e.g. More food focus, swap day 2 activities…"
-                value={feedback} onChange={e => setFeedback(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && handleTweak()}
-              />
-              <button className="btn-primary px-4" onClick={handleTweak} disabled={tweaking || !feedback.trim()}>
-                {tweaking ? '…' : '↺'}
-              </button>
-            </div>
-            {tweaking && <p className="text-sm text-slate-3 mt-2 italic">Reworking your itinerary…</p>}
-          </div>
-
-          {/* Action buttons */}
-          <div className="flex gap-2 flex-wrap">
-            <button className="btn-secondary text-sm flex-1" onClick={fetchActivities}>🎟️ Things to book ahead</button>
-            <button className="btn-secondary text-sm flex-1" onClick={fetchMapPins}>🗺️ Show on map</button>
-          </div>
+          {/* dummy section - map stays outside modal */}
 
           {/* Activities */}
           {activities !== null && (
@@ -608,6 +688,7 @@ export default function BookTab({
   flightDetails, setFlightDetails,
   carHire, setCarHire,
   selectedHotel, setSelectedHotel,
+  user, onSaveTrip,
 }) {
   const [destInput, setDestInput] = useState(
     chosenDest ? `${chosenDest.CITY}, ${chosenDest.COUNTRY}` : ''
@@ -694,6 +775,7 @@ export default function BookTab({
           carHire={carHire}
           selectedHotel={selectedHotel}
           setSelectedHotel={setSelectedHotel}
+          flightDetails={flightDetails}
         />
       </Section>
 
@@ -709,6 +791,8 @@ export default function BookTab({
           selectedHotel={selectedHotel}
           itinerary={itinerary}
           setItinerary={setItinerary}
+          user={user}
+          onSaveTrip={onSaveTrip}
         />
       </Section>
     </div>

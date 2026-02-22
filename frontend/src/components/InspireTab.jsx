@@ -15,39 +15,77 @@ const TRANSPORT = [
   { value: 'public transport',  label: '🚇 Public transport only' },
 ]
 
+// Airport coordinates for nearest-airport detection
+const AIRPORT_COORDS = [
+  { value: 'london',        lat: 51.509,  lon: -0.118  },
+  { value: 'manchester',    lat: 53.365,  lon: -2.273  },
+  { value: 'birmingham',    lat: 52.454,  lon: -1.748  },
+  { value: 'edinburgh',     lat: 55.950,  lon: -3.372  },
+  { value: 'glasgow',       lat: 55.872,  lon: -4.433  },
+  { value: 'bristol',       lat: 51.383,  lon: -2.719  },
+  { value: 'leeds',         lat: 53.865,  lon: -1.660  },
+  { value: 'newcastle',     lat: 55.038,  lon: -1.692  },
+  { value: 'liverpool',     lat: 53.334,  lon: -2.850  },
+  { value: 'belfast',       lat: 54.658,  lon: -6.216  },
+  { value: 'cardiff',       lat: 51.397,  lon: -3.343  },
+  { value: 'southampton',   lat: 50.950,  lon: -1.357  },
+  { value: 'aberdeen',      lat: 57.202,  lon: -2.198  },
+  { value: 'inverness',     lat: 57.543,  lon: -4.048  },
+  { value: 'east midlands', lat: 52.831,  lon: -1.328  },
+  { value: 'exeter',        lat: 50.734,  lon: -3.414  },
+  { value: 'norwich',       lat: 52.676,  lon:  1.282  },
+  { value: 'bournemouth',   lat: 50.780,  lon: -1.842  },
+  { value: 'doncaster',     lat: 53.475,  lon: -1.011  },
+  { value: 'newquay',       lat: 50.440,  lon: -4.995  },
+  { value: 'teesside',      lat: 54.509,  lon: -1.430  },
+  { value: 'jersey',        lat: 49.208,  lon: -2.196  },
+  { value: 'guernsey',      lat: 49.435,  lon: -2.602  },
+  { value: 'isle of man',   lat: 54.083,  lon: -4.624  },
+]
+
+function getNearestAirport(lat, lon) {
+  let nearest = AIRPORT_COORDS[0]
+  let minDist = Infinity
+  for (const ap of AIRPORT_COORDS) {
+    const d = Math.hypot(ap.lat - lat, ap.lon - lon)
+    if (d < minDist) { minDist = d; nearest = ap }
+  }
+  return nearest.value
+}
+
 // UK airports list for the dropdown
 const UK_AIRPORTS = [
-  { label: 'Aberdeen (ABZ)',                               value: 'aberdeen' },
-  { label: 'Belfast — all airports (BFS/BHD)',             value: 'belfast' },
-  { label: 'Birmingham (BHX)',                             value: 'birmingham' },
-  { label: 'Bournemouth (BOH)',                            value: 'bournemouth' },
-  { label: 'Bristol (BRS)',                                value: 'bristol' },
-  { label: 'Cardiff (CWL)',                                value: 'cardiff' },
-  { label: 'Doncaster Sheffield (DSA)',                    value: 'doncaster' },
-  { label: 'East Midlands (EMA)',                          value: 'east midlands' },
-  { label: 'Edinburgh (EDI)',                              value: 'edinburgh' },
-  { label: 'Exeter (EXT)',                                 value: 'exeter' },
-  { label: 'Glasgow — all airports (GLA/PIK)',             value: 'glasgow' },
-  { label: 'Glasgow Prestwick (PIK)',                      value: 'prestwick' },
-  { label: 'Guernsey (GCI)',                               value: 'guernsey' },
-  { label: 'Inverness (INV)',                              value: 'inverness' },
-  { label: 'Isle of Man (IOM)',                            value: 'isle of man' },
-  { label: 'Jersey (JER)',                                 value: 'jersey' },
-  { label: 'Leeds Bradford (LBA)',                         value: 'leeds' },
-  { label: 'Liverpool (LPL)',                              value: 'liverpool' },
   { label: 'London — all airports (LHR/LGW/STN/LTN/LCY)', value: 'london' },
-  { label: 'London City (LCY)',                            value: 'london city' },
-  { label: 'London Gatwick (LGW)',                         value: 'gatwick' },
-  { label: 'London Heathrow (LHR)',                        value: 'heathrow' },
-  { label: 'London Luton (LTN)',                           value: 'luton' },
-  { label: 'London Southend (SEN)',                        value: 'southend' },
-  { label: 'London Stansted (STN)',                        value: 'stansted' },
-  { label: 'Manchester (MAN)',                             value: 'manchester' },
-  { label: 'Newcastle (NCL)',                              value: 'newcastle' },
-  { label: 'Newquay (NQY)',                                value: 'newquay' },
-  { label: 'Norwich (NWI)',                                value: 'norwich' },
-  { label: 'Southampton (SOU)',                            value: 'southampton' },
-  { label: 'Teesside / Durham (MME)',                      value: 'teesside' },
+  { label: 'London City (LCY)',                             value: 'london city' },
+  { label: 'London Gatwick (LGW)',                          value: 'gatwick' },
+  { label: 'London Heathrow (LHR)',                         value: 'heathrow' },
+  { label: 'London Luton (LTN)',                            value: 'luton' },
+  { label: 'London Southend (SEN)',                         value: 'southend' },
+  { label: 'London Stansted (STN)',                         value: 'stansted' },
+  { label: 'Aberdeen (ABZ)',                                value: 'aberdeen' },
+  { label: 'Belfast — all airports (BFS/BHD)',              value: 'belfast' },
+  { label: 'Birmingham (BHX)',                              value: 'birmingham' },
+  { label: 'Bournemouth (BOH)',                             value: 'bournemouth' },
+  { label: 'Bristol (BRS)',                                 value: 'bristol' },
+  { label: 'Cardiff (CWL)',                                 value: 'cardiff' },
+  { label: 'Doncaster Sheffield (DSA)',                     value: 'doncaster' },
+  { label: 'East Midlands (EMA)',                           value: 'east midlands' },
+  { label: 'Edinburgh (EDI)',                               value: 'edinburgh' },
+  { label: 'Exeter (EXT)',                                  value: 'exeter' },
+  { label: 'Glasgow — all airports (GLA/PIK)',              value: 'glasgow' },
+  { label: 'Glasgow Prestwick (PIK)',                       value: 'prestwick' },
+  { label: 'Guernsey (GCI)',                                value: 'guernsey' },
+  { label: 'Inverness (INV)',                               value: 'inverness' },
+  { label: 'Isle of Man (IOM)',                             value: 'isle of man' },
+  { label: 'Jersey (JER)',                                  value: 'jersey' },
+  { label: 'Leeds Bradford (LBA)',                          value: 'leeds' },
+  { label: 'Liverpool (LPL)',                               value: 'liverpool' },
+  { label: 'Manchester (MAN)',                              value: 'manchester' },
+  { label: 'Newcastle (NCL)',                               value: 'newcastle' },
+  { label: 'Newquay (NQY)',                                 value: 'newquay' },
+  { label: 'Norwich (NWI)',                                 value: 'norwich' },
+  { label: 'Southampton (SOU)',                             value: 'southampton' },
+  { label: 'Teesside / Durham (MME)',                       value: 'teesside' },
 ]
 
 function AirportSelect({ value, onChange }) {
@@ -185,6 +223,23 @@ export default function InspireTab({ prefs, setPrefs, inspireResults, setInspire
   const [prefsOpen, setPrefsOpen] = useState(!inspireResults.length)
   const [dateMode, setDateMode]   = useState('flexible')
   const [destPref, setDestPref]   = useState('')
+  const [geoStatus, setGeoStatus] = useState('') // 'detecting' | 'found' | 'denied' | ''
+
+  // Auto-detect nearest airport on first load (only if no airport already saved)
+  useEffect(() => {
+    if (prefs.startingPoint) return // already set, don't override
+    if (!navigator.geolocation) return
+    setGeoStatus('detecting')
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const nearest = getNearestAirport(pos.coords.latitude, pos.coords.longitude)
+        setPrefs(p => ({ ...p, startingPoint: nearest }))
+        setGeoStatus('found')
+        setTimeout(() => setGeoStatus(''), 3000)
+      },
+      () => setGeoStatus('denied')
+    )
+  }, [])
 
   const update = (key, val) => setPrefs(p => ({ ...p, [key]: val }))
 
@@ -243,7 +298,16 @@ export default function InspireTab({ prefs, setPrefs, inspireResults, setInspire
             {/* Departure airport */}
             <div>
               <label className="label">📍 Departing from</label>
-              <AirportSelect value={prefs.startingPoint} onChange={v => update('startingPoint', v)} />
+              <AirportSelect value={prefs.startingPoint} onChange={v => { update('startingPoint', v); setGeoStatus('') }} />
+              {geoStatus === 'detecting' && (
+                <p className="text-xs text-slate-3 mt-1 italic">📍 Detecting your nearest airport…</p>
+              )}
+              {geoStatus === 'found' && (
+                <p className="text-xs text-green-400 mt-1">✓ Nearest airport detected</p>
+              )}
+              {geoStatus === 'denied' && (
+                <p className="text-xs text-slate-3 mt-1">Location access denied — please select manually</p>
+              )}
             </div>
 
             {/* Budget + Group */}
