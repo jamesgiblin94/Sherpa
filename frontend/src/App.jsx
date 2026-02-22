@@ -8,13 +8,17 @@ import AuthModal from './components/AuthModal'
 import MyTrips from './components/MyTrips'
 import ProfileSetup from './components/ProfileSetup'
 import AccountMenu from './components/AccountMenu'
+import ItineraryModal from './components/ItineraryModal'
+import { api } from './utils/api'
 import { getProfile } from './utils/supabase'
 
 export default function App() {
   const [tab, setTab] = useState('inspire')
   const [user, setUser] = useState(null)
   const [showAuth, setShowAuth] = useState(false)
-  const [showItineraryModal, setShowItineraryModal] = useState(false)
+  const [showItineraryModal,  setShowItineraryModal]  = useState(false)
+  const [modalActivities,     setModalActivities]     = useState(null)
+  const [modalActivitiesLoad, setModalActivitiesLoad] = useState(false)
   const [showProfile, setShowProfile] = useState(false)
   const [showEditProfile, setShowEditProfile] = useState(false)
   const [userProfile, setUserProfile] = useState(null)
@@ -73,12 +77,28 @@ export default function App() {
   const resetTripState = (newPrefs) => {
     const p = newPrefs || prefs
     setItinerary('')
+
+    // If specific dates set, use them. If flexible month, approximate mid-month dates.
+    let outbound = p.specificDepart || null
+    let ret      = p.specificReturn  || null
+    if (!outbound && p.travelMonth) {
+      const months = ['January','February','March','April','May','June',
+                      'July','August','September','October','November','December']
+      const mIdx = months.indexOf(p.travelMonth)
+      if (mIdx >= 0) {
+        const year = new Date().getFullYear()
+        const useYear = mIdx < new Date().getMonth() ? year + 1 : year
+        outbound = `${useYear}-${String(mIdx+1).padStart(2,'0')}-10`
+        ret      = `${useYear}-${String(mIdx+1).padStart(2,'0')}-14`
+      }
+    }
+
     setFlightDetails({
-      confirmed:     false,
-      outboundDate:  p.specificDepart || null,
-      returnDate:    p.specificReturn  || null,
-      arrivalTime:   '11:00',
-      departureTime: '14:00',
+      confirmed:       false,
+      outboundDate:    outbound,
+      returnDate:      ret,
+      arrivalTime:     '11:00',
+      departureTime:   '14:00',
       selectedAirport: null,
     })
     setCarHire({ confirmed: null, data: null })
@@ -98,6 +118,7 @@ export default function App() {
     if (trip.car_hire)       setCarHire(trip.car_hire)
     if (trip.hotel)          setSelectedHotel(trip.hotel)
     setShowItineraryModal(true)
+    setModalActivities(null)
   }
 
   const tabs = [
@@ -210,6 +231,38 @@ export default function App() {
           </div>
         )}
       </main>
+
+      {/* Global itinerary modal — rendered at App level so it works from any tab */}
+      {showItineraryModal && itinerary && (
+        <ItineraryModal
+          itinerary={itinerary}
+          dest={chosenDest}
+          destData={null}
+          prefs={prefs}
+          flightDetails={flightDetails}
+          selectedHotel={selectedHotel}
+          onClose={() => setShowItineraryModal(false)}
+          activities={modalActivities}
+          activitiesLoading={modalActivitiesLoad}
+          fetchActivities={async () => {
+            if (!chosenDest?.CITY || !itinerary) return
+            setModalActivitiesLoad(true)
+            try {
+              const d = await api.activities({ dest_city: chosenDest.CITY, itinerary })
+              setModalActivities({ gyg: d.gyg || [], direct: d.direct || [] })
+            } catch {}
+            finally { setModalActivitiesLoad(false) }
+          }}
+          feedback=""
+          setFeedback={() => {}}
+          onTweak={() => {}}
+          tweaking={false}
+          onSave={() => {}}
+          saving={false}
+          saved={false}
+          user={user}
+        />
+      )}
     </div>
   )
 }

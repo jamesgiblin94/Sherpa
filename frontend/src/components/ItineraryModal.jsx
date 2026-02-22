@@ -1,4 +1,6 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
+import SherpaSpinner from './SherpaSpinner'
+import { api } from '../utils/api'
 
 // ── Parser ─────────────────────────────────────────────────────────────────────
 // Handles Claude's exact format:
@@ -236,17 +238,144 @@ function CostGuide({ lines }) {
 }
 
 // ── Main Modal ─────────────────────────────────────────────────────────────────
+
+
+
+// ── Day photo ──────────────────────────────────────────────────────────────────
+const DAY_PHOTO_CACHE = {}
+
+function DayPhoto({ day, destCity }) {
+  const [photo, setPhoto] = useState(null)
+
+  useEffect(() => {
+    if (!day || !destCity) return
+    // Build query from day title or first activity block
+    const firstActivity = day.blocks?.find(b => !b.isTime && b.title)?.title || ''
+    const query = firstActivity
+      ? `${destCity} ${firstActivity}`
+      : `${destCity} travel`
+    const cacheKey = query
+
+    if (DAY_PHOTO_CACHE[cacheKey]) { setPhoto(DAY_PHOTO_CACHE[cacheKey]); return }
+
+    api.photo(query)
+      .then(p => {
+        if (p?.url) { DAY_PHOTO_CACHE[cacheKey] = p; setPhoto(p) }
+      })
+      .catch(() => {})
+  }, [day?.title, destCity])
+
+  if (!photo) return null
+
+  return (
+    <div className="relative rounded-xl overflow-hidden mb-4" style={{height: 160}}>
+      <img src={photo.url} alt=""
+           className="w-full h-full object-cover"
+           style={{filter:'brightness(0.75)'}} />
+      <div className="absolute inset-0" style={{background:'linear-gradient(to top, #111614 0%, transparent 60%)'}} />
+      {photo.credit && (
+        <a href={photo.credit_url} target="_blank" rel="noopener noreferrer"
+           className="absolute bottom-2 right-2 text-xs"
+           style={{color:'rgba(255,255,255,0.4)'}}>
+          📷 {photo.credit}
+        </a>
+      )}
+    </div>
+  )
+}
+
+// ── Venue card with photo ──────────────────────────────────────────────────────
+function VenueCard({ venue, typeIcon, destCity }) {
+  const [photo, setPhoto] = useState(null)
+
+  useEffect(() => {
+    api.photo(`${venue.name} ${destCity} restaurant food`)
+      .then(p => { if (p?.url) setPhoto(p) })
+      .catch(() => {})
+  }, [venue.name])
+
+  return (
+    <div className="px-4 py-3">
+      <div className="flex items-start gap-3">
+        {/* Photo thumbnail */}
+        <div className="shrink-0 rounded-lg overflow-hidden"
+             style={{width:56, height:56, background:'#222b28'}}>
+          {photo
+            ? <img src={photo.thumb || photo.url} alt={venue.name}
+                   className="w-full h-full object-cover" style={{filter:'brightness(0.9)'}} />
+            : <div className="w-full h-full flex items-center justify-center text-xl">{typeIcon}</div>
+          }
+        </div>
+        {/* Info */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 mb-0.5">
+            <p className="font-medium text-sm truncate" style={{color:'#f0ede8'}}>{venue.name}</p>
+          </div>
+          <p className="text-xs leading-relaxed" style={{color:'#a0a098'}}>{venue.note}</p>
+        </div>
+        {/* Instagram button */}
+        <a href={venue.instagram_url} target="_blank" rel="noopener noreferrer"
+           className="shrink-0 text-xs px-2.5 py-1.5 rounded-lg whitespace-nowrap flex items-center gap-1"
+           style={{background:'rgba(131,58,180,0.12)', color:'#c084fc', border:'1px solid rgba(131,58,180,0.25)'}}>
+          📸
+        </a>
+      </div>
+    </div>
+  )
+}
+
+// ── Language phrase lookup ─────────────────────────────────────────────────────
+const PHRASE_CACHE = {}
+
+function LanguagePhrase({ dest, phrase }) {
+  const [translation, setTranslation] = useState(null)
+
+  useEffect(() => {
+    if (!dest) return
+    const key = `${dest}:${phrase}`
+    if (PHRASE_CACHE[key]) { setTranslation(PHRASE_CACHE[key]); return }
+
+    api.chat({
+      message: `What is "${phrase}" in the local language of ${dest}? Reply with ONLY the translated phrase and pronunciation in brackets, nothing else. Example format: Grazie (GRAT-see-eh)`,
+      context: '',
+    }).then(r => {
+      const t = r.reply?.trim() || '—'
+      PHRASE_CACHE[key] = t
+      setTranslation(t)
+    }).catch(() => setTranslation('—'))
+  }, [dest, phrase])
+
+  return (
+    <span className="text-xs font-medium" style={{color:'#a8c9ad'}}>
+      {translation || '…'}
+    </span>
+  )
+}
+
 export default function ItineraryModal({
   itinerary, dest, destData, prefs, flightDetails, selectedHotel,
   feedback, setFeedback, onTweak, tweaking,
   onSave, saving, saved, user,
-  activities, fetchActivities,
+  activities, fetchActivities, activitiesLoading,
   skyscannerUrl, bookingUrl, carHireUrl,
   onClose,
 }) {
   const [activeTab, setActiveTab] = useState('overview')
+  const [photos, setPhotos] = useState([])
   const [activeDay, setActiveDay] = useState(0)
   const scrollRef = useRef(null)
+
+  useEffect(() => {
+    if (!dest?.CITY) return
+    // Build 4 search queries: city + each of the first 3 highlights
+    const queries = [
+      dest.CITY,
+      ...(destData?.highlights?.slice(0, 3) || []).map(h => `${dest.CITY} ${h}`)
+    ].slice(0, 4)
+
+    Promise.all(queries.map(q => api.photo(q).catch(() => ({ url: null }))))
+      .then(results => setPhotos(results.filter(p => p.url)))
+  }, [dest?.CITY])
 
   const { days, sections } = parseDays(itinerary)
   const scrollTop = () => scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
@@ -323,6 +452,20 @@ export default function ItineraryModal({
           {/* ── OVERVIEW ── */}
           {activeTab === 'overview' && (
             <div className="space-y-3">
+
+              {/* Photo strip */}
+              {photos.length > 0 && (
+                <div className="flex gap-2 -mx-1">
+                  {photos.map((p, i) => (
+                    <div key={i} className="flex-1 min-w-0 rounded-xl overflow-hidden"
+                         style={{height: 120, flexBasis: `${100/photos.length}%`}}>
+                      <img src={p.thumb || p.url} alt=""
+                           className="w-full h-full object-cover"
+                           style={{filter:'brightness(0.9)'}} />
+                    </div>
+                  ))}
+                </div>
+              )}
 
               {/* Inspire card content */}
               {destData && (
@@ -420,6 +563,8 @@ export default function ItineraryModal({
                 {daysWithTransfer[activeDay]?.title}
               </h3>
 
+              <DayPhoto day={daysWithTransfer[activeDay]} destCity={dest?.CITY} />
+
               {(daysWithTransfer[activeDay]?.blocks || []).map((block, i) => (
                 <Block key={i} block={block} />
               ))}
@@ -494,40 +639,71 @@ export default function ItineraryModal({
                 </div>
               )}
 
-              {/* Activities */}
-              <div className="rounded-xl overflow-hidden" style={{border:'1px solid rgba(127,182,133,0.2)'}}>
-                <div className="px-4 py-2.5" style={{background:'rgba(127,182,133,0.12)'}}>
-                  <p className="text-xs font-bold uppercase tracking-widest" style={{color:'#7fb685'}}>🎟️ Activities & Experiences</p>
-                </div>
-                <div className="p-4" style={{background:'#1a2020'}}>
-                  {activities === null ? (
-                    <div className="text-center py-2">
-                      <p className="text-sm mb-3" style={{color:'#a0a098'}}>Find out what to book in advance for this trip.</p>
-                      <button className="btn-primary px-6 text-sm" onClick={fetchActivities}>Find things to book</button>
-                    </div>
-                  ) : activities.length === 0 ? (
-                    <p className="text-sm" style={{color:'#a0a098'}}>No specific advance bookings needed.</p>
+              {/* Activities & Direct Bookings */}
+              {activities === null ? (
+                <div className="rounded-xl p-5 text-center" style={{background:'#1a2020', border:'1px solid rgba(127,182,133,0.2)'}}>
+                  {activitiesLoading ? (
+                    <SherpaSpinner messages={['Finding tours to book…','Checking restaurant reservations…','Spotting must-see museums…','Almost there…']} />
                   ) : (
-                    <div className="space-y-3">
-                      {activities.map((a,i) => (
-                        <div key={i} className="flex items-start justify-between gap-3 pb-3 border-b last:border-0"
-                             style={{borderColor:'rgba(255,255,255,0.06)'}}>
-                          <div>
-                            <p className="font-medium text-sm" style={{color:'#f0ede8'}}>{a.name}</p>
-                            <p className="text-xs mt-0.5" style={{color:'#a0a098'}}>{a.why_book_ahead}</p>
-                          </div>
-                          <a href={a.gyg_url} target="_blank" rel="noopener noreferrer"
-                             className="shrink-0 text-xs px-3 py-1.5 rounded-lg whitespace-nowrap"
-                             style={{background:'rgba(127,182,133,0.15)', color:'#7fb685',
-                                     border:'1px solid rgba(127,182,133,0.25)'}}>
-                            Book →
-                          </a>
-                        </div>
-                      ))}
-                    </div>
+                    <>
+                      <p className="text-sm mb-3" style={{color:'#a0a098'}}>Find out what to book in advance for this trip.</p>
+                      <button className="btn-primary px-6 text-sm" onClick={() => fetchActivities && fetchActivities()}>Find things to book</button>
+                    </>
                   )}
                 </div>
-              </div>
+              ) : (
+                <div className="space-y-4">
+
+                  {/* GYG — tours and experiences */}
+                  {activities.gyg?.length > 0 && (
+                    <div className="rounded-xl overflow-hidden" style={{border:'1px solid rgba(127,182,133,0.2)'}}>
+                      <div className="px-4 py-2.5 flex items-center gap-2" style={{background:'rgba(127,182,133,0.1)'}}>
+                        <span>🎟️</span>
+                        <p className="text-xs font-bold uppercase tracking-widest" style={{color:'#7fb685'}}>Tours & Experiences</p>
+                        <span className="text-xs ml-auto" style={{color:'#7a7870'}}>via GetYourGuide</span>
+                      </div>
+                      <div className="divide-y" style={{background:'#1a2020', borderColor:'rgba(255,255,255,0.06)'}}>
+                        {activities.gyg.map((a, i) => (
+                          <div key={i} className="flex items-start justify-between gap-3 px-4 py-3">
+                            <div className="flex-1">
+                              <p className="font-medium text-sm" style={{color:'#f0ede8'}}>{a.name}</p>
+                              <p className="text-xs mt-0.5" style={{color:'#a0a098'}}>{a.why_book_ahead}</p>
+                            </div>
+                            <a href={a.gyg_url} target="_blank" rel="noopener noreferrer"
+                               className="shrink-0 text-xs px-3 py-1.5 rounded-lg whitespace-nowrap"
+                               style={{background:'rgba(127,182,133,0.15)', color:'#7fb685', border:'1px solid rgba(127,182,133,0.3)'}}>
+                              Book →
+                            </a>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Direct bookings — restaurants and bars */}
+                  {activities.direct?.length > 0 && (
+                    <div className="rounded-xl overflow-hidden" style={{border:'1px solid rgba(127,182,133,0.15)'}}>
+                      <div className="px-4 py-2.5 flex items-center gap-2" style={{background:'rgba(255,255,255,0.04)'}}>
+                        <span>📍</span>
+                        <p className="text-xs font-bold uppercase tracking-widest" style={{color:'#a0a098'}}>Find on Instagram</p>
+                        <span className="text-xs ml-auto" style={{color:'#7a7870'}}>restaurants & bars</span>
+                      </div>
+                      <div className="divide-y" style={{background:'#1a2020', borderColor:'rgba(255,255,255,0.06)'}}>
+                        {activities.direct.map((a, i) => {
+                          const typeIcon = {Restaurant:'🍽️', Museum:'🏛️', Attraction:'⭐', Bar:'🍸', Cafe:'☕'}[a.type] || '📍'
+                          return (
+                            <VenueCard key={i} venue={a} typeIcon={typeIcon} destCity={dest?.CITY} />
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {activities.gyg?.length === 0 && activities.direct?.length === 0 && (
+                    <p className="text-sm text-center py-4" style={{color:'#a0a098'}}>No specific advance bookings needed for this trip.</p>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -536,30 +712,39 @@ export default function ItineraryModal({
             <div className="space-y-3">
               <p className="text-xs uppercase tracking-widest mb-3" style={{color:'#7a7870'}}>Local knowledge for {dest?.CITY}</p>
 
-              {sections.tips.length > 0 && sections.tips.map((tip, i) => (
+              {/* Top 3 AI tips — no numbers */}
+              {sections.tips.slice(0, 3).map((tip, i) => (
                 <div key={i} className="rounded-xl p-4 flex items-start gap-3"
                      style={{background:'#1a2020', border:'1px solid rgba(127,182,133,0.15)'}}>
-                  <span className="shrink-0">📌</span>
-                  <p className="text-sm leading-relaxed" style={{color:'#c8c4bc'}}>{tip}</p>
+                  <span className="shrink-0" style={{color:'#7fb685'}}>—</span>
+                  <p className="text-sm leading-relaxed" style={{color:'#c8c4bc'}}>
+                    {tip.replace(/^\d+[\.\)]\s*/, '')}
+                  </p>
                 </div>
               ))}
 
-              {[
-                { icon:'🚌', title:'Getting around',  tip:'Google Maps works well in most European cities for public transport routing. Download offline maps before you go.' },
-                { icon:'💶', title:'Cash & cards',    tip:'Most places accept cards but carry some local currency for markets, small cafés and tips.' },
-                { icon:'🗣️', title:'Language',        tip:'A few basic words in the local language go a long way — locals really appreciate the effort.' },
-                { icon:'📱', title:'Useful apps',     tip:'Download Google Translate with offline language packs before you travel.' },
-                { icon:'🚨', title:'Emergencies',     tip:'112 works as an emergency number across Europe. Save your hotel address in the local language on your phone.' },
-              ].map((tip, i) => (
-                <div key={`g${i}`} className="rounded-xl p-4 flex items-start gap-3"
-                     style={{background:'#1a2020', border:'1px solid rgba(255,255,255,0.08)'}}>
-                  <span className="text-xl shrink-0">{tip.icon}</span>
-                  <div>
-                    <p className="font-medium text-sm mb-1" style={{color:'#f0ede8'}}>{tip.title}</p>
-                    <p className="text-sm" style={{color:'#a0a098'}}>{tip.tip}</p>
-                  </div>
+              {/* Language tips */}
+              <div className="rounded-xl p-4" style={{background:'#1a2020', border:'1px solid rgba(255,255,255,0.08)'}}>
+                <div className="flex items-center gap-2 mb-3">
+                  <span>🗣️</span>
+                  <p className="font-medium text-sm" style={{color:'#f0ede8'}}>Useful phrases</p>
                 </div>
-              ))}
+                <div className="space-y-2">
+                  {[
+                    { phrase: 'Hello',            key: 'hello' },
+                    { phrase: 'Please',           key: 'please' },
+                    { phrase: 'Thank you',        key: 'thankyou' },
+                    { phrase: 'Do you speak English?', key: 'english' },
+                    { phrase: 'The bill, please', key: 'bill' },
+                  ].map(({ phrase }) => (
+                    <div key={phrase} className="flex justify-between items-center py-1.5 border-b last:border-0"
+                         style={{borderColor:'rgba(255,255,255,0.05)'}}>
+                      <span className="text-xs" style={{color:'#7a7870'}}>{phrase}</span>
+                      <LanguagePhrase dest={dest?.CITY} phrase={phrase} />
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
           )}
         </div>

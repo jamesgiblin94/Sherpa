@@ -140,23 +140,56 @@ function AirportSelect({ value, onChange }) {
 
 function DestCard({ dest, onChoose }) {
   const [expanded, setExpanded] = useState(false)
+  const [photo,    setPhoto]    = useState(null)
+
+  useEffect(() => {
+    api.photo(`${dest.CITY} ${dest.COUNTRY} travel`)
+      .then(p => { if (p.url) setPhoto(p) })
+      .catch(() => {})
+  }, [dest.CITY])
+
   return (
-    <div className="card-gold hover:border-sage/60 transition-colors">
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex-1">
-          <div className="flex items-center gap-2 mb-1">
+    <div className="card-gold hover:border-sage/60 transition-colors overflow-hidden">
+      {/* Hero photo */}
+      {photo && (
+        <div className="relative -mx-5 -mt-5 mb-4 h-44 overflow-hidden">
+          <img
+            src={photo.url}
+            alt={dest.CITY}
+            className="w-full h-full object-cover"
+            style={{ filter: 'brightness(0.85)' }}
+          />
+          <div className="absolute inset-0" style={{background:'linear-gradient(to bottom, transparent 50%, #1a2020 100%)'}} />
+          <div className="absolute bottom-3 left-4 flex items-center gap-2">
+            <span className="text-2xl">{dest.EMOJI}</span>
+            <div>
+              <h3 className="font-serif text-xl" style={{color:'#f0ede8'}}>{dest.CITY}</h3>
+              <p className="text-xs uppercase tracking-wider" style={{color:'rgba(240,237,232,0.6)'}}>{dest.COUNTRY}</p>
+            </div>
+          </div>
+          {dest.BEST_FOR && (
+            <div className="absolute top-3 right-3">
+              <span className="badge">{dest.BEST_FOR}</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* No photo fallback header */}
+      {!photo && (
+        <div className="flex items-start justify-between gap-4 mb-3">
+          <div className="flex items-center gap-2">
             <span className="text-2xl">{dest.EMOJI}</span>
             <div>
               <h3 className="font-serif text-xl text-sage-light">{dest.CITY}</h3>
               <p className="text-xs text-slate-3 uppercase tracking-wider">{dest.COUNTRY}</p>
             </div>
           </div>
-          <p className="text-sm text-slate mt-1 italic">"{dest.TAGLINE}"</p>
+          {dest.BEST_FOR && <span className="badge shrink-0">{dest.BEST_FOR}</span>}
         </div>
-        <div className="text-right shrink-0">
-          {dest.BEST_FOR && <span className="badge">{dest.BEST_FOR}</span>}
-        </div>
-      </div>
+      )}
+
+      <p className="text-sm text-slate italic mb-4">"{dest.TAGLINE}"</p>
 
       <div className="grid grid-cols-2 gap-3 mt-4 text-sm">
         {dest.FLIGHT && (

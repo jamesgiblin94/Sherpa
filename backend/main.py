@@ -2,10 +2,11 @@
 Sherpa Travel Planner — FastAPI Backend
 Replaces the Streamlit app.py logic with proper REST + streaming API endpoints.
 """
+
+import os
 from dotenv import load_dotenv
 load_dotenv()
-
-import os, json, re
+import requests, json, re
 from datetime import date, timedelta
 from typing import Optional
 from contextlib import asynccontextmanager
@@ -24,6 +25,7 @@ GYG_PARTNER_ID          = os.getenv("GYG_PARTNER_ID", "")
 RENTALCARS_AFFILIATE_ID = os.getenv("RENTALCARS_AFFILIATE_ID", "")
 
 claude = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+UNSPLASH_KEY = "2L-hCJytn58q2JavZAt1tSO3FL6amLDpSGpWD8k_KFg"
 
 # ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(title="Sherpa API", version="1.0.0")
@@ -239,6 +241,30 @@ def get_dest_airports(req: AirportsRequest):
 
 
 # ── Inspire ───────────────────────────────────────────────────────────────────
+@app.get("/api/photo")
+def get_photo(query: str):
+    try:
+        resp = requests.get(
+            "https://api.unsplash.com/search/photos",
+            params={"query": query, "per_page": 1, "orientation": "landscape"},
+            headers={"Authorization": f"Client-ID {UNSPLASH_KEY}"},
+            timeout=5
+        )
+        data = resp.json()
+        results = data.get("results", [])
+        if results:
+            photo = results[0]
+            return {
+                "url": photo["urls"]["regular"],
+                "thumb": photo["urls"]["small"],
+                "credit": photo["user"]["name"],
+                "credit_url": photo["user"]["links"]["html"],
+            }
+        return {"url": None}
+    except Exception:
+        return {"url": None}
+
+
 @app.post("/api/inspire")
 def inspire(req: InspireRequest):
     """Generate 1-3 destination suggestions."""
@@ -520,7 +546,7 @@ def hotel_note(req: HotelNoteRequest):
             max_tokens=200,
             messages=[{"role": "user", "content": prompt}]
         )
-        return {"note": resp.content[0].text.strip()}
+        return {"note": re.sub(r'^#+\s*', '', resp.content[0].text.strip())}
     except Exception as e:
         raise HTTPException(500, str(e))
 
@@ -529,27 +555,44 @@ def hotel_note(req: HotelNoteRequest):
 @app.post("/api/activities")
 def activities(req: ActivitiesRequest):
     prompt = (
-        f"Extract up to 6 specific bookable activities or experiences from this {req.dest_city} itinerary "
-        "that benefit from advance booking (tours, skip-the-line tickets, cooking classes, etc).\n\n"
-        f"Itinerary:\n{req.itinerary[:3000]}\n\n"
-        'Return ONLY valid JSON: {"activities": [{"name":"...", "type":"...", "why_book_ahead":"...", '
-        '"search_term":"short search term for GetYourGuide"}]}'
+        f"Analyse this {req.dest_city} itinerary and return two lists in JSON.\n\n"
+        "Return ONLY this exact JSON structure, no other text:\n"
+        '{"gyg": [{"name":"...","type":"...","why_book_ahead":"...","search_term":"..."}], '
+        '"direct": [{"name":"...","type":"Restaurant|Museum|Bar|Cafe","note":"one line tip"}]}\n\n'
+        "gyg: up to 3 experiences best booked via GetYourGuide (tours, skip-the-line, cooking classes, boat trips).\n"
+        "direct: up to 4 specific restaurants, bars or cafes mentioned in the itinerary worth finding on Instagram.\n\n"
+        f"Itinerary:\n{req.itinerary[:2500]}"
     )
     try:
-        data = claude_json(prompt, max_tokens=600)
-        activities_list = data.get("activities", [])
+        resp = claude.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=1000,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        text = resp.content[0].text.strip()
+        text = re.sub(r'^```json\s*', '', text)
+        text = re.sub(r'\s*```$', '', text)
+        data = json.loads(text)
         partner = req.gyg_partner_id or GYG_PARTNER_ID
-        # Add GYG URLs
-        for a in activities_list:
+
+        gyg_list = data.get("gyg", [])
+        for a in gyg_list:
             q = a.get("search_term", a.get("name", "")).replace(" ", "+")
             a["gyg_url"] = (
                 f"https://www.getyourguide.com/s/?q={q}&partner_id={partner}"
                 if partner else
                 f"https://www.getyourguide.com/s/?q={q}"
             )
-        return {"activities": activities_list}
+
+        direct_list = data.get("direct", [])
+        for d in direct_list:
+            from urllib.parse import quote
+            query = f"{d.get('name', '')} {req.dest_city}".strip()
+            d["instagram_url"] = f"https://www.instagram.com/search/top/?q={quote(query)}"
+
+        return {"gyg": gyg_list, "direct": direct_list}
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise HTTPException(500, f"Activities error: {str(e)}")
 
 
 # ── Itinerary tweak (streaming) ───────────────────────────────────────────────

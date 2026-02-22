@@ -41,17 +41,18 @@ function TimeSelect({ label, value, onChange }) {
 // ── Flight section ───────────────────────────────────────────────────────────
 
 function FlightSection({ prefs, dest, flightDetails, setFlightDetails }) {
-  const [airports, setAirports] = useState([])
-  const [loading,  setLoading]  = useState(false)
-  const [depart,   setDepart]   = useState(flightDetails.outboundDate ? new Date(flightDetails.outboundDate) : null)
-  const [ret,      setRet]      = useState(flightDetails.returnDate   ? new Date(flightDetails.returnDate)   : null)
+  const [airports,  setAirports]  = useState([])
+  const [loading,   setLoading]   = useState(false)
+  const [depart,    setDepart]    = useState(flightDetails.outboundDate ? new Date(flightDetails.outboundDate) : null)
+  const [ret,       setRet]       = useState(flightDetails.returnDate   ? new Date(flightDetails.returnDate)   : null)
+  const [datesOpen, setDatesOpen] = useState(!flightDetails.outboundDate)
 
   // Sync local date state when flightDetails changes externally (e.g. from Inspire dates)
   useEffect(() => {
-    if (flightDetails.outboundDate) setDepart(new Date(flightDetails.outboundDate))
+    if (flightDetails.outboundDate) { setDepart(new Date(flightDetails.outboundDate)); setDatesOpen(false) }
     if (flightDetails.returnDate)   setRet(new Date(flightDetails.returnDate))
   }, [flightDetails.outboundDate, flightDetails.returnDate])
-  const [selAp,    setSelAp]    = useState(flightDetails.selectedAirport || null)
+  const [selAp, setSelAp] = useState(flightDetails.selectedAirport || null)
 
   const originSky = (() => {
     const map = { london:'LOND', heathrow:'LHR', gatwick:'LGW', stansted:'STN', luton:'LTN',
@@ -94,42 +95,46 @@ function FlightSection({ prefs, dest, flightDetails, setFlightDetails }) {
 
   return (
     <div className="space-y-4">
-      {/* Date range picker — single inline calendar */}
+      {/* Date picker — collapsible */}
       <div className="card">
-        <h3 className="font-medium text-slate mb-3">📅 Travel dates</h3>
-
-        {/* Selected dates summary */}
-        <div className="flex gap-3 mb-3">
-          <div className="flex-1 px-3 py-2 rounded-lg text-sm text-center"
-               style={{background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.1)', color: depart ? '#f0ede8' : '#7a7870'}}>
-            {depart ? depart.toLocaleDateString('en-GB', {day:'numeric',month:'short',year:'numeric'}) : 'Depart'}
+        <button className="w-full flex items-center justify-between" onClick={() => setDatesOpen(o => !o)}>
+          <div className="flex items-center gap-3">
+            <span>📅</span>
+            {depart && ret ? (
+              <div className="text-left">
+                <p className="text-sm font-medium" style={{color:'#f0ede8'}}>
+                  {depart.toLocaleDateString('en-GB', {day:'numeric',month:'short'})} → {ret.toLocaleDateString('en-GB', {day:'numeric',month:'short',year:'numeric'})}
+                </p>
+                <p className="text-xs" style={{color:'#7a7870'}}>{Math.round((ret-depart)/86400000)} nights</p>
+              </div>
+            ) : (
+              <p className="text-sm" style={{color:'#7a7870'}}>Select travel dates</p>
+            )}
           </div>
-          <span className="text-slate-3 self-center">→</span>
-          <div className="flex-1 px-3 py-2 rounded-lg text-sm text-center"
-               style={{background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.1)', color: ret ? '#f0ede8' : '#7a7870'}}>
-            {ret ? ret.toLocaleDateString('en-GB', {day:'numeric',month:'short',year:'numeric'}) : 'Return'}
-          </div>
-        </div>
+          <span className="text-xs" style={{color:'#7a7870'}}>{datesOpen ? '▲' : '▼'}</span>
+        </button>
 
-        {/* Inline range calendar */}
-        <div className="range-picker-wrap">
-          <DatePicker
-            selected={depart}
-            onChange={(dates) => {
-              const [start, end] = dates
-              setDepart(start)
-              setRet(end)
-            }}
-            startDate={depart}
-            endDate={ret}
-            selectsRange
-            inline
-            monthsShown={2}
-            calendarStartDay={1}
-            minDate={new Date()}
-            fixedHeight
-          />
-        </div>
+        {datesOpen && (
+          <div className="mt-4 range-picker-wrap">
+            <DatePicker
+              selected={depart}
+              onChange={(dates) => {
+                const [start, end] = dates
+                setDepart(start)
+                setRet(end)
+                if (start && end) setDatesOpen(false)
+              }}
+              startDate={depart}
+              endDate={ret}
+              selectsRange
+              inline
+              monthsShown={2}
+              calendarStartDay={1}
+              minDate={new Date()}
+              fixedHeight
+            />
+          </div>
+        )}
       </div>
 
       {/* Airport options */}
@@ -471,7 +476,8 @@ function ItinerarySection({ prefs, dest, flightDetails, carHire, selectedHotel, 
   const [loading,    setLoading]    = useState(false)
   const [feedback,   setFeedback]   = useState('')
   const [tweaking,   setTweaking]   = useState(false)
-  const [activities, setActivities] = useState(null)
+  const [activities,        setActivities]        = useState(null)
+  const [activitiesLoading, setActivitiesLoading] = useState(false)
   const [mapPins,    setMapPins]    = useState(null)
   const [showMap,    setShowMap]    = useState(false)
   const [saving,     setSaving]     = useState(false)
@@ -534,11 +540,18 @@ function ItinerarySection({ prefs, dest, flightDetails, carHire, selectedHotel, 
   }
 
   const fetchActivities = async () => {
-    if (!itinerary) return
+    if (!itinerary) { console.warn('fetchActivities: no itinerary'); return }
+    setActivitiesLoading(true)
     try {
       const d = await api.activities({ dest_city: dest.CITY, itinerary })
-      setActivities(d.activities || [])
-    } catch {}
+      console.log('activities response:', d)
+      setActivities({ gyg: d.gyg || [], direct: d.direct || [] })
+    } catch (err) {
+      console.error('fetchActivities error:', err)
+      setActivities({ gyg: [], direct: [] })
+    } finally {
+      setActivitiesLoading(false)
+    }
   }
 
   const fetchMapPins = async () => {
@@ -576,13 +589,44 @@ function ItinerarySection({ prefs, dest, flightDetails, carHire, selectedHotel, 
 
   if (!dest) return null
 
+  const flightsDone  = !!(flightDetails?.confirmed && flightDetails?.outboundDate && flightDetails?.returnDate)
+  const carHireDone  = !!(carHire?.confirmed !== null && carHire?.confirmed !== undefined)
+  const hotelDone    = !!(selectedHotel?.trim())
+  const allDone      = flightsDone && carHireDone && hotelDone
+
   return (
     <div className="space-y-4">
+
+      {/* Checklist — only show if not all done */}
+      {!allDone && (
+        <div className="rounded-xl p-4 space-y-2" style={{background:'#1a2020', border:'1px solid rgba(127,182,133,0.15)'}}>
+          <p className="text-xs font-semibold uppercase tracking-widest mb-3" style={{color:'#7a7870'}}>Complete to build your plan</p>
+          {[
+            { done: flightsDone, label: 'Confirm your flight dates' },
+            { done: carHireDone, label: 'Choose car hire — yes or no' },
+            { done: hotelDone,   label: 'Enter where you\'re staying' },
+          ].map(({ done, label }) => (
+            <div key={label} className="flex items-center gap-2.5">
+              <div className="w-4 h-4 rounded-full flex items-center justify-center shrink-0"
+                   style={{background: done ? 'rgba(127,182,133,0.2)' : 'rgba(255,255,255,0.05)',
+                           border: `1px solid ${done ? '#7fb685' : 'rgba(255,255,255,0.1)'}`}}>
+                {done && <span className="text-xs" style={{color:'#7fb685'}}>✓</span>}
+              </div>
+              <p className="text-sm" style={{color: done ? '#7a7870' : '#c8c4bc',
+                                             textDecoration: done ? 'line-through' : 'none'}}>
+                {label}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Build button */}
       <button
         className="btn-primary w-full py-3 text-base"
         onClick={buildItinerary}
-        disabled={loading}
+        disabled={loading || !allDone}
+        style={!allDone ? {opacity: 0.35, cursor: 'not-allowed'} : {}}
       >
         {loading ? '⏳ Building your plan…' : `🗓️ ${itinerary ? 'Rebuild' : 'Build'} My Full Plan`}
       </button>
@@ -630,6 +674,7 @@ function ItinerarySection({ prefs, dest, flightDetails, carHire, selectedHotel, 
           user={user}
           activities={activities}
           fetchActivities={fetchActivities}
+          activitiesLoading={activitiesLoading}
           skyscannerUrl={flightDetails.confirmed && flightDetails.selectedAirport
             ? (() => {
                 const ap = flightDetails.selectedAirport
@@ -663,30 +708,6 @@ function ItinerarySection({ prefs, dest, flightDetails, carHire, selectedHotel, 
       {/* Keep old action buttons outside modal for map */}
       {itinerary && !loading && (
         <>
-          {/* dummy section - map stays outside modal */}
-
-          {/* Activities */}
-          {activities !== null && (
-            <div className="card">
-              <h4 className="text-sm font-semibold text-slate mb-3">🎟️ Worth booking in advance</h4>
-              {activities.length === 0
-                ? <p className="text-sm text-slate-3">No specific advance bookings needed for this itinerary.</p>
-                : activities.map((a,i) => (
-                  <div key={i} className="flex items-start justify-between gap-3 py-2 border-b border-white/8 last:border-0">
-                    <div>
-                      <p className="text-sm font-medium text-slate">{a.name}</p>
-                      <p className="text-xs text-slate-3">{a.why_book_ahead}</p>
-                    </div>
-                    <a href={a.gyg_url} target="_blank" rel="noopener noreferrer"
-                       className="btn-secondary text-xs px-3 py-1 whitespace-nowrap shrink-0">
-                      Book →
-                    </a>
-                  </div>
-                ))
-              }
-            </div>
-          )}
-
           {/* Map pins list (simple, no iframe) */}
           {showMap && mapPins !== null && (
             <div className="card">

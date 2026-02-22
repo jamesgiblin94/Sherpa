@@ -1,6 +1,4 @@
-const BASE = import.meta.env.DEV
-  ? '/api'
-  : 'https://sherpa-backend-ffpa.onrender.com/api'
+const BASE = '/api'
 
 async function post(path, body) {
   const res = await fetch(`${BASE}${path}`, {
@@ -21,6 +19,7 @@ async function get(path) {
   return res.json()
 }
 
+// Streaming helper — calls onChunk(text) for each chunk, returns full text
 async function stream(path, body, onChunk) {
   const res = await fetch(`${BASE}${path}`, {
     method: 'POST',
@@ -56,6 +55,7 @@ export const api = {
   getConfig:       ()      => get('/config'),
   getDestAirports: (body)  => post('/dest-airports', body),
   inspire:         (body)  => post('/inspire', body),
+  photo:           (query) => get(`/photo?query=${encodeURIComponent(query)}`),
   itinerary:       (body, onChunk) => stream('/itinerary', body, onChunk),
   carHire:         (body)  => post('/car-hire', body),
   accomTips:       (body)  => post('/accom-tips', body),
