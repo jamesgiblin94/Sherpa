@@ -35,11 +35,11 @@ export default function AuthModal({ onClose, onSuccess }) {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
       <div className="card-gold w-full max-w-sm mx-4 relative">
         <button
-          className="absolute top-3 right-3 text-slate-3 hover:text-gold transition-colors text-lg"
+          className="absolute top-3 right-3 text-slate-3 hover:text-sage transition-colors text-lg"
           onClick={onClose}
         >✕</button>
 
-        <h2 className="font-serif text-xl text-gold-light mb-1">
+        <h2 className="font-serif text-xl text-sage-light mb-1">
           {mode === 'signin' ? 'Welcome back' : 'Create account'}
         </h2>
         <p className="text-sm text-slate-3 mb-5">
@@ -87,7 +87,7 @@ export default function AuthModal({ onClose, onSuccess }) {
         <p className="text-center text-sm text-slate-3 mt-4">
           {mode === 'signin' ? "Don't have an account? " : 'Already have an account? '}
           <button
-            className="text-gold hover:text-gold-light transition-colors"
+            className="text-sage hover:text-sage-light transition-colors"
             onClick={() => { setMode(m => m === 'signin' ? 'signup' : 'signin'); setError(''); setSuccess('') }}
           >
             {mode === 'signin' ? 'Sign up' : 'Sign in'}

@@ -121,8 +121,8 @@ function AirportSelect({ value, onChange }) {
             {filtered.map(a => (
               <div
                 key={a.value}
-                className={`px-4 py-2.5 text-sm cursor-pointer hover:bg-gold/10 hover:text-gold transition-colors
-                  ${a.value === value ? 'text-gold bg-gold/5' : 'text-slate'}`}
+                className={`px-4 py-2.5 text-sm cursor-pointer hover:bg-sage/10 hover:text-sage transition-colors
+                  ${a.value === value ? 'text-sage bg-sage/5' : 'text-slate'}`}
                 onClick={() => { onChange(a.value); setSearch(''); setOpen(false) }}
               >
                 {a.label}
@@ -141,13 +141,13 @@ function AirportSelect({ value, onChange }) {
 function DestCard({ dest, onChoose }) {
   const [expanded, setExpanded] = useState(false)
   return (
-    <div className="card-gold hover:border-gold/60 transition-colors">
+    <div className="card-gold hover:border-sage/60 transition-colors">
       <div className="flex items-start justify-between gap-4">
         <div className="flex-1">
           <div className="flex items-center gap-2 mb-1">
             <span className="text-2xl">{dest.EMOJI}</span>
             <div>
-              <h3 className="font-serif text-xl text-gold-light">{dest.CITY}</h3>
+              <h3 className="font-serif text-xl text-sage-light">{dest.CITY}</h3>
               <p className="text-xs text-slate-3 uppercase tracking-wider">{dest.COUNTRY}</p>
             </div>
           </div>
@@ -177,7 +177,7 @@ function DestCard({ dest, onChoose }) {
         <ul className="mt-3 space-y-1">
           {dest.highlights.map((h, i) => (
             <li key={i} className="text-sm text-slate flex gap-2">
-              <span className="text-gold shrink-0">•</span>{h}
+              <span className="text-sage shrink-0">•</span>{h}
             </li>
           ))}
         </ul>
@@ -191,7 +191,7 @@ function DestCard({ dest, onChoose }) {
       {dest.cost_guide?.length > 0 && (
         <div className="mt-3">
           <button
-            className="text-xs text-gold hover:text-gold-light transition-colors"
+            className="text-xs text-sage hover:text-sage-light transition-colors"
             onClick={() => setExpanded(e => !e)}
           >
             {expanded ? '▲ Hide' : '▼ Show'} cost guide
@@ -200,7 +200,7 @@ function DestCard({ dest, onChoose }) {
             <div className="mt-2 space-y-1 border-t border-white/8 pt-2">
               {dest.cost_guide.map((line, i) => (
                 <p key={i} className="text-xs text-slate" dangerouslySetInnerHTML={{
-                  __html: line.replace(/\*\*(.*?)\*\*/g, '<strong class="text-gold-light">$1</strong>')
+                  __html: line.replace(/\*\*(.*?)\*\*/g, '<strong class="text-sage-light">$1</strong>')
                 }} />
               ))}
             </div>
@@ -289,7 +289,7 @@ export default function InspireTab({ prefs, setPrefs, inspireResults, setInspire
           className="w-full flex items-center justify-between text-left"
           onClick={() => setPrefsOpen(o => !o)}
         >
-          <h2 className="font-serif text-lg text-gold-light">🎒 Your Travel Preferences</h2>
+          <h2 className="font-serif text-lg text-sage-light">🎒 Your Travel Preferences</h2>
           <span className="text-slate-3 text-sm">{prefsOpen ? '▲ Close' : '▼ Edit'}</span>
         </button>
 
@@ -343,8 +343,8 @@ export default function InspireTab({ prefs, setPrefs, inspireResults, setInspire
                     onClick={() => toggleTrip(t)}
                     className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
                       prefs.tripType.includes(t)
-                        ? 'bg-gold/20 border-gold/60 text-gold'
-                        : 'border-white/10 text-slate hover:border-gold/30 hover:text-gold-light'
+                        ? 'bg-sage/20 border-sage/60 text-sage'
+                        : 'border-white/10 text-slate hover:border-sage/30 hover:text-sage-light'
                     }`}
                   >
                     {t}
@@ -363,8 +363,8 @@ export default function InspireTab({ prefs, setPrefs, inspireResults, setInspire
                     onClick={() => update('transportMode', t.value)}
                     className={`flex-1 text-sm py-2 rounded-lg border transition-colors ${
                       prefs.transportMode === t.value
-                        ? 'bg-gold/20 border-gold/60 text-gold'
-                        : 'border-white/10 text-slate hover:border-gold/30'
+                        ? 'bg-sage/20 border-sage/60 text-sage'
+                        : 'border-white/10 text-slate hover:border-sage/30'
                     }`}
                   >
                     {t.label}
@@ -394,8 +394,8 @@ export default function InspireTab({ prefs, setPrefs, inspireResults, setInspire
                     onClick={() => setDateMode(m)}
                     className={`text-sm px-4 py-1.5 rounded-lg border transition-colors capitalize ${
                       dateMode === m
-                        ? 'bg-gold/20 border-gold/60 text-gold'
-                        : 'border-white/10 text-slate hover:border-gold/30'
+                        ? 'bg-sage/20 border-sage/60 text-sage'
+                        : 'border-white/10 text-slate hover:border-sage/30'
                     }`}
                   >
                     {m === 'flexible' ? '🗓 Flexible (pick a month)' : '📆 Specific dates'}
@@ -485,7 +485,7 @@ export default function InspireTab({ prefs, setPrefs, inspireResults, setInspire
       {!loading && inspireResults.length > 0 && (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <h2 className="font-serif text-xl text-gold-light">
+            <h2 className="font-serif text-xl text-sage-light">
               {inspireResults.length === 1 ? 'Your destination' : `${inspireResults.length} destinations for you`}
             </h2>
             <button className="btn-secondary text-sm" onClick={() => setPrefsOpen(true)}>
@@ -502,7 +502,7 @@ export default function InspireTab({ prefs, setPrefs, inspireResults, setInspire
       {chosenDest && !loading && (
         <div className="card-gold text-center py-4">
           <p className="text-slate-3 text-sm">Currently planning</p>
-          <p className="font-serif text-lg text-gold mt-1">
+          <p className="font-serif text-lg text-sage mt-1">
             {chosenDest.EMOJI} {chosenDest.CITY}, {chosenDest.COUNTRY}
           </p>
           <button className="btn-primary mt-3" onClick={onBook}>

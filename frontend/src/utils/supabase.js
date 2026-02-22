@@ -83,3 +83,24 @@ export async function deleteTrip(id) {
 
   if (error) throw new Error(error.message)
 }
+
+// ── Profile helpers ───────────────────────────────────────────
+export async function getProfile(userId) {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('*')
+    .eq('id', userId)
+    .single()
+  if (error) return null
+  return data
+}
+
+export async function saveProfile(userId, profile) {
+  const { data, error } = await supabase
+    .from('profiles')
+    .upsert({ id: userId, ...profile })
+    .select()
+    .single()
+  if (error) throw new Error(error.message)
+  return data
+}

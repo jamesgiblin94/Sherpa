@@ -6,11 +6,18 @@ import BookTab from './components/BookTab'
 import SupportTab from './components/SupportTab'
 import AuthModal from './components/AuthModal'
 import MyTrips from './components/MyTrips'
+import ProfileSetup from './components/ProfileSetup'
+import AccountMenu from './components/AccountMenu'
+import { getProfile } from './utils/supabase'
 
 export default function App() {
   const [tab, setTab] = useState('inspire')
   const [user, setUser] = useState(null)
   const [showAuth, setShowAuth] = useState(false)
+  const [showItineraryModal, setShowItineraryModal] = useState(false)
+  const [showProfile, setShowProfile] = useState(false)
+  const [showEditProfile, setShowEditProfile] = useState(false)
+  const [userProfile, setUserProfile] = useState(null)
 
   const [prefs, setPrefs] = useLocalStorage('sherpa_prefs', {
     startingPoint:  '',
@@ -35,10 +42,24 @@ export default function App() {
   const [carHire, setCarHire]             = useState({ confirmed: null, data: null })
   const [selectedHotel, setSelectedHotel] = useState('')
 
+  const loadProfile = async (u) => {
+    const profile = await getProfile(u.id)
+    if (!profile) {
+      setShowProfile(true)
+    } else {
+      setUserProfile(profile)
+    }
+  }
+
   useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => setUser(user))
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      setUser(user)
+      if (user) loadProfile(user)
+    })
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user || null)
+      const u = session?.user || null
+      setUser(u)
+      if (u) loadProfile(u)
     })
     return () => subscription.unsubscribe()
   }, [])
@@ -76,7 +97,7 @@ export default function App() {
     if (trip.flight_details) setFlightDetails(trip.flight_details)
     if (trip.car_hire)       setCarHire(trip.car_hire)
     if (trip.hotel)          setSelectedHotel(trip.hotel)
-    setTab('book')
+    setShowItineraryModal(true)
   }
 
   const tabs = [
@@ -85,33 +106,43 @@ export default function App() {
     { id: 'trips',   label: '🧭  Trips'  },
   ]
 
+  const switchTab = (id) => {
+    setTab(id)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
   return (
     <div className="min-h-screen">
-      <header className="border-b border-gold/20 bg-navy/80 backdrop-blur-sm sticky top-0 z-50">
+      <header className="sticky top-0 z-50" style={{background:'rgba(17,22,20,0.92)', backdropFilter:'blur(12px)', borderBottom:'1px solid rgba(127,182,133,0.1)'}}>
         <div className="max-w-4xl mx-auto px-4 py-4 flex items-center justify-between">
           <div>
-            <h1 className="font-serif text-2xl text-gold tracking-wide">Sherpa</h1>
-            <p className="text-xs text-slate-3 tracking-widest uppercase">AI Travel Planner</p>
+            <h1 className="font-serif text-2xl tracking-wide" style={{color:'#a8c9ad'}}>Sherpa</h1>
+            <p className="text-xs tracking-widest uppercase" style={{color:'#7a7870'}}>AI Travel Planner</p>
           </div>
           <div className="flex items-center gap-3">
             <nav className="flex gap-1">
               {tabs.map(t => (
                 <button
                   key={t.id}
-                  onClick={() => setTab(t.id)}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                    tab === t.id ? 'bg-gold text-navy' : 'text-slate hover:text-gold-light'
-                  }`}
+                  onClick={() => switchTab(t.id)}
+                  className="px-4 py-2 rounded-lg text-sm font-medium transition-all"
+                  style={{
+                    background: tab === t.id ? 'rgba(127,182,133,0.15)' : 'transparent',
+                    color: tab === t.id ? '#a8c9ad' : '#7a7870',
+                    border: tab === t.id ? '1px solid rgba(127,182,133,0.3)' : '1px solid transparent',
+                  }}
                 >
                   {t.label}
                 </button>
               ))}
             </nav>
             {user ? (
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-slate-3 hidden sm:block">{user.email}</span>
-                <button className="btn-secondary text-xs px-3 py-1.5" onClick={handleSignOut}>Sign out</button>
-              </div>
+              <AccountMenu
+                user={user}
+                userProfile={userProfile}
+                onEditProfile={() => setShowEditProfile(true)}
+                onSignOut={handleSignOut}
+              />
             ) : (
               <button className="btn-secondary text-xs px-3 py-1.5" onClick={() => setShowAuth(true)}>Sign in</button>
             )}
@@ -123,13 +154,28 @@ export default function App() {
         <AuthModal onClose={() => setShowAuth(false)} onSuccess={() => setShowAuth(false)} />
       )}
 
+      {showProfile && user && (
+        <ProfileSetup
+          user={user}
+          onComplete={(profile) => { setUserProfile(profile); setShowProfile(false) }}
+        />
+      )}
+
+      {showEditProfile && user && (
+        <ProfileSetup
+          user={user}
+          existingProfile={userProfile}
+          onComplete={(profile) => { setUserProfile(profile); setShowEditProfile(false) }}
+        />
+      )}
+
       <main className="max-w-4xl mx-auto px-4 py-8">
         {tab === 'inspire' && (
           <InspireTab
             prefs={prefs} setPrefs={setPrefs}
             inspireResults={inspireResults} setInspireResults={setInspireResults}
             chosenDest={chosenDest} setChosenDest={handleChooseDest}
-            onBook={() => setTab('book')}
+            onBook={() => switchTab('book')}
           />
         )}
         {tab === 'book' && (
@@ -140,7 +186,8 @@ export default function App() {
             flightDetails={flightDetails} setFlightDetails={setFlightDetails}
             carHire={carHire} setCarHire={setCarHire}
             selectedHotel={selectedHotel} setSelectedHotel={setSelectedHotel}
-            user={user} onSaveTrip={() => setTab('mytrips')}
+            user={user} userProfile={userProfile} onSaveTrip={() => switchTab('trips')}
+            externalShowModal={showItineraryModal} setExternalShowModal={setShowItineraryModal}
           />
         )}
         {tab === 'trips' && (

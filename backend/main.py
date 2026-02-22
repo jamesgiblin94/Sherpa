@@ -2,10 +2,10 @@
 Sherpa Travel Planner — FastAPI Backend
 Replaces the Streamlit app.py logic with proper REST + streaming API endpoints.
 """
-
-import os, json, re
 from dotenv import load_dotenv
 load_dotenv()
+
+import os, json, re
 from datetime import date, timedelta
 from typing import Optional
 from contextlib import asynccontextmanager
@@ -30,7 +30,7 @@ app = FastAPI(title="Sherpa API", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:5173", "http://localhost:3000", "https://sherpaai.uk"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -118,6 +118,7 @@ class ItineraryRequest(BaseModel):
     departure_time: str = "14:00"
     arrival_airport: str = ""
     transfer_label: str = "30 min"
+    user_profile: Optional[dict] = None
 
 class CarHireRequest(BaseModel):
     dest: str
@@ -367,6 +368,27 @@ def build_itinerary(req: ItineraryRequest):
     elif "public transport" in req.transport_mode.lower():
         car_hire_note = "This traveller is using PUBLIC TRANSPORT ONLY — no car hire at any point."
 
+    # Build personalisation block from user profile
+    profile_text = ""
+    if req.user_profile:
+        p = req.user_profile
+        lines = []
+        if p.get("age_range"):
+            lines.append(f"- Age range: {p['age_range']}")
+        if p.get("activity_level"):
+            activity_map = {1:"very relaxed (minimal walking, lots of rest)", 2:"gentle (light sightseeing, easy pace)", 3:"balanced (mix of activity and downtime)", 4:"active (plenty of walking, some physical activities)", 5:"very active (hiking, cycling, packed days)"}
+            lines.append(f"- Activity preference: {activity_map.get(p['activity_level'], p['activity_level'])}")
+        if p.get("dietary"):
+            labels = {"vegan":"vegan","vegetarian":"vegetarian","pescatarian":"pescatarian","gluten_free":"gluten free","halal":"halal","kosher":"kosher","nut_allergy":"nut allergy","dairy_free":"dairy free"}
+            diets = [labels.get(d, d) for d in p["dietary"]]
+            lines.append(f"- Dietary requirements: {', '.join(diets)}")
+        if p.get("dietary_other"):
+            lines.append(f"- Additional dietary notes: {p['dietary_other']}")
+        if p.get("extra_info"):
+            lines.append(f"- Personal notes: {p['extra_info']}")
+        if lines:
+            profile_text = "\n\nPERSONAL TRAVELLER PROFILE (tailor everything to this):\n" + "\n".join(lines)
+
     prompt = f"""You are Sherpa, an expert travel planner. Create a detailed day-by-day itinerary for {req.dest}.
 
 TRAVELLER PROFILE:
@@ -410,7 +432,7 @@ FORMAT — use these exact ## headings:
 ## 📌 Local Tips
 [3 short practical tips that most travel guides miss]
 
-Be specific — name real restaurants, streets, neighbourhoods. Tailor everything to the {req.budget} budget."""
+Be specific — name real restaurants, streets, neighbourhoods. Tailor everything to the {req.budget} budget.{profile_text}"""
 
     def generate():
         with claude.messages.stream(
@@ -488,13 +510,9 @@ Use real neighbourhood names. Tailor to {req.budget} budget and {req.group_type}
 @app.post("/api/hotel-note")
 def hotel_note(req: HotelNoteRequest):
     prompt = (
-        f"Give a short honest briefing on '{req.hotel}' in {req.dest_city} "
-        f"for a {req.group_type} traveller {'with a hire car' if req.car_hire=='yes' else 'using public transport'}.\n"
-        "Cover in 3-4 sentences: neighbourhood and what it's like, how well-located for main sights, "
-        f"{'parking situation' if req.car_hire=='yes' else 'nearest transport links'}, "
-        f"and one pro or con for this traveller"
-        + (f" interested in {req.priorities}" if req.priorities else "") + ". "
-        "If you don't recognise the specific property, describe the area. Be concise and practical."
+        f"In 2 sentences max, describe '{req.hotel}' in {req.dest_city}: "
+        "the neighbourhood feel, and how well-located it is for getting around. "
+        "Be direct and specific. No filler."
     )
     try:
         resp = claude.messages.create(

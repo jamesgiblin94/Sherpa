@@ -11,7 +11,7 @@ import SherpaSpinner from './SherpaSpinner'
 function Section({ title, children }) {
   return (
     <div>
-      <h2 className="font-serif text-xl text-gold-light mb-4">{title}</h2>
+      <h2 className="font-serif text-xl text-sage-light mb-4">{title}</h2>
       {children}
     </div>
   )
@@ -45,6 +45,12 @@ function FlightSection({ prefs, dest, flightDetails, setFlightDetails }) {
   const [loading,  setLoading]  = useState(false)
   const [depart,   setDepart]   = useState(flightDetails.outboundDate ? new Date(flightDetails.outboundDate) : null)
   const [ret,      setRet]      = useState(flightDetails.returnDate   ? new Date(flightDetails.returnDate)   : null)
+
+  // Sync local date state when flightDetails changes externally (e.g. from Inspire dates)
+  useEffect(() => {
+    if (flightDetails.outboundDate) setDepart(new Date(flightDetails.outboundDate))
+    if (flightDetails.returnDate)   setRet(new Date(flightDetails.returnDate))
+  }, [flightDetails.outboundDate, flightDetails.returnDate])
   const [selAp,    setSelAp]    = useState(flightDetails.selectedAirport || null)
 
   const originSky = (() => {
@@ -88,21 +94,41 @@ function FlightSection({ prefs, dest, flightDetails, setFlightDetails }) {
 
   return (
     <div className="space-y-4">
-      {/* Date pickers */}
+      {/* Date range picker — single inline calendar */}
       <div className="card">
         <h3 className="font-medium text-slate mb-3">📅 Travel dates</h3>
-        <div className="flex gap-4 flex-wrap">
-          <div>
-            <label className="label">Depart</label>
-            <DatePicker selected={depart} onChange={setDepart} dateFormat="dd/MM/yyyy"
-              calendarStartDay={1} minDate={new Date()} className="input w-36" placeholderText="DD/MM/YYYY" />
+
+        {/* Selected dates summary */}
+        <div className="flex gap-3 mb-3">
+          <div className="flex-1 px-3 py-2 rounded-lg text-sm text-center"
+               style={{background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.1)', color: depart ? '#f0ede8' : '#7a7870'}}>
+            {depart ? depart.toLocaleDateString('en-GB', {day:'numeric',month:'short',year:'numeric'}) : 'Depart'}
           </div>
-          <span className="text-slate-3 self-end pb-2.5">→</span>
-          <div>
-            <label className="label">Return</label>
-            <DatePicker selected={ret} onChange={setRet} dateFormat="dd/MM/yyyy"
-              calendarStartDay={1} minDate={depart || new Date()} className="input w-36" placeholderText="DD/MM/YYYY" />
+          <span className="text-slate-3 self-center">→</span>
+          <div className="flex-1 px-3 py-2 rounded-lg text-sm text-center"
+               style={{background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.1)', color: ret ? '#f0ede8' : '#7a7870'}}>
+            {ret ? ret.toLocaleDateString('en-GB', {day:'numeric',month:'short',year:'numeric'}) : 'Return'}
           </div>
+        </div>
+
+        {/* Inline range calendar */}
+        <div className="range-picker-wrap">
+          <DatePicker
+            selected={depart}
+            onChange={(dates) => {
+              const [start, end] = dates
+              setDepart(start)
+              setRet(end)
+            }}
+            startDate={depart}
+            endDate={ret}
+            selectsRange
+            inline
+            monthsShown={2}
+            calendarStartDay={1}
+            minDate={new Date()}
+            fixedHeight
+          />
         </div>
       </div>
 
@@ -119,7 +145,7 @@ function FlightSection({ prefs, dest, flightDetails, setFlightDetails }) {
           <div key={i} className="card-gold">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <p className="font-medium text-gold-light">
+                <p className="font-medium text-sage-light">
                   ✈️ {dest.CITY} → {ap.airport_name} ({ap.iata})
                 </p>
                 <div className="mt-2 space-y-1 text-sm text-slate">
@@ -132,7 +158,7 @@ function FlightSection({ prefs, dest, flightDetails, setFlightDetails }) {
                   )}
                   {ptLeg.length > 0 && (
                     <p>
-                      🚇 By public transport: <span className="text-gold font-medium">{ap.transfer_mins} min</span>
+                      🚇 By public transport: <span className="text-sage font-medium">{ap.transfer_mins} min</span>
                       {' — '}{ptLeg.map(l => `${modeIcon[l.mode]||'🚌'} ${l.mode} ${l.mins}min`).join(' → ')}
                     </p>
                   )}
@@ -242,7 +268,7 @@ function CarHireSection({ prefs, dest, flightDetails, carHire, setCarHire }) {
               </div>
             </div>
             <ul className="space-y-1">
-              {d.reasons?.map((r,i) => <li key={i} className="text-sm text-slate flex gap-2"><span className="text-gold">•</span>{r}</li>)}
+              {d.reasons?.map((r,i) => <li key={i} className="text-sm text-slate flex gap-2"><span className="text-sage">•</span>{r}</li>)}
             </ul>
           </div>
 
@@ -251,15 +277,15 @@ function CarHireSection({ prefs, dest, flightDetails, carHire, setCarHire }) {
             <div className="card text-center">
               <p className="text-sm text-slate mb-3">Will you hire a car for this trip?</p>
               <div className="flex gap-3 justify-center">
-                <button className="btn-primary px-8" onClick={() => setCarHire(c => ({ ...c, confirmed: 'yes' }))}>✅ Yes</button>
-                <button className="btn-secondary px-8" onClick={() => setCarHire(c => ({ ...c, confirmed: 'no' }))}>✖ No</button>
+                <button className="btn-secondary px-8" onClick={() => setCarHire(c => ({ ...c, confirmed: 'yes' }))}>Yes</button>
+                <button className="btn-secondary px-8" onClick={() => setCarHire(c => ({ ...c, confirmed: 'no' }))}>No</button>
               </div>
             </div>
           )}
           {carHire.confirmed !== null && (
             <div className="card text-center">
               <p className="text-slate">{carHire.confirmed === 'yes' ? '🚗 Car hire: Yes' : '🚇 Car hire: No'}</p>
-              <button className="text-xs text-slate-3 hover:text-gold mt-2 transition-colors"
+              <button className="text-xs text-slate-3 hover:text-sage mt-2 transition-colors"
                 onClick={() => setCarHire(c => ({ ...c, confirmed: null }))}>
                 ↩ Change answer
               </button>
@@ -384,12 +410,12 @@ function AccomSection({ prefs, dest, carHire, selectedHotel, setSelectedHotel, f
               <h4 className="text-sm font-semibold text-slate mb-3">📍 Best areas to stay</h4>
               <div className="space-y-3">
                 {tips.areas.map((a,i) => (
-                  <div key={i} className="border-l-2 border-gold/40 pl-3">
+                  <div key={i} className="border-l-2 border-sage/40 pl-3">
                     <div className="flex items-baseline justify-between">
                       <p className="font-medium text-slate">{a.name}</p>
                       <span className="text-xs text-slate-3">{a.price_range}</span>
                     </div>
-                    <p className="text-xs text-gold italic">{a.vibe}</p>
+                    <p className="text-xs text-sage italic">{a.vibe}</p>
                     <p className="text-xs text-slate-3 mt-0.5">{a.best_for}</p>
                     {a.tip && <p className="text-xs text-slate mt-1">💡 {a.tip}</p>}
                   </div>
@@ -402,7 +428,7 @@ function AccomSection({ prefs, dest, carHire, selectedHotel, setSelectedHotel, f
             <div className="card">
               <h4 className="text-sm font-semibold text-slate mb-2">💡 Booking tips</h4>
               <ul className="space-y-1.5">
-                {tips.booking_tips.map((t,i) => <li key={i} className="text-sm text-slate flex gap-2"><span className="text-gold">•</span>{t}</li>)}
+                {tips.booking_tips.map((t,i) => <li key={i} className="text-sm text-slate flex gap-2"><span className="text-sage">•</span>{t}</li>)}
               </ul>
               {tips.avoid && <p className="text-sm text-red-400/80 mt-3 flex gap-2"><span>⚠️</span>{tips.avoid}</p>}
             </div>
@@ -441,7 +467,7 @@ function AccomSection({ prefs, dest, carHire, selectedHotel, setSelectedHotel, f
 
 // ── Itinerary section ────────────────────────────────────────────────────────
 
-function ItinerarySection({ prefs, dest, flightDetails, carHire, selectedHotel, itinerary, setItinerary, user, onSaveTrip }) {
+function ItinerarySection({ prefs, dest, flightDetails, carHire, selectedHotel, itinerary, setItinerary, user, userProfile, onSaveTrip, externalShowModal, setExternalShowModal }) {
   const [loading,    setLoading]    = useState(false)
   const [feedback,   setFeedback]   = useState('')
   const [tweaking,   setTweaking]   = useState(false)
@@ -451,6 +477,10 @@ function ItinerarySection({ prefs, dest, flightDetails, carHire, selectedHotel, 
   const [saving,     setSaving]     = useState(false)
   const [saved,      setSaved]      = useState(false)
   const [showModal,  setShowModal]  = useState(false)
+
+  // Open modal when a trip is loaded externally (from MyTrips)
+  const isModalOpen = showModal || !!externalShowModal
+  const closeModal  = () => { setShowModal(false); if (setExternalShowModal) setExternalShowModal(false) }
 
   const buildItinerary = async () => {
     if (!dest) return
@@ -477,6 +507,7 @@ function ItinerarySection({ prefs, dest, flightDetails, carHire, selectedHotel, 
         departure_time: flightDetails.departureTime || '14:00',
         arrival_airport: ap ? `${ap.airport_name} (${ap.iata})` : dest.CITY,
         transfer_label: ap?.transfer_label || '30 min',
+        user_profile: userProfile || null,
       }, (text) => setItinerary(text))
     } catch (e) {
       setItinerary('Something went wrong. Please try again.')
@@ -553,8 +584,22 @@ function ItinerarySection({ prefs, dest, flightDetails, carHire, selectedHotel, 
         onClick={buildItinerary}
         disabled={loading}
       >
-        🗓️ {itinerary ? 'Rebuild' : 'Build'} My Full Plan
+        {loading ? '⏳ Building your plan…' : `🗓️ ${itinerary ? 'Rebuild' : 'Build'} My Full Plan`}
       </button>
+
+      {/* Loading spinner */}
+      {loading && (
+        <div className="card">
+          <SherpaSpinner messages={[
+            'Plotting your route…',
+            'Scouting the best restaurants…',
+            'Checking the weather…',
+            'Finding hidden gems…',
+            'Timing your days perfectly…',
+            'Almost ready…',
+          ]} />
+        </div>
+      )}
 
       {/* Open modal button if itinerary already exists */}
       {itinerary && !loading && (
@@ -567,7 +612,7 @@ function ItinerarySection({ prefs, dest, flightDetails, carHire, selectedHotel, 
       )}
 
       {/* Itinerary modal */}
-      {showModal && (
+      {isModalOpen && (
         <ItineraryModal
           itinerary={itinerary}
           dest={dest}
@@ -611,7 +656,7 @@ function ItinerarySection({ prefs, dest, flightDetails, carHire, selectedHotel, 
             if (ret) params.set('doDate', ret)
             return `https://www.rentalcars.com/en/?${params.toString()}`
           })()}
-          onClose={() => setShowModal(false)}
+          onClose={closeModal}
         />
       )}
 
@@ -647,7 +692,7 @@ function ItinerarySection({ prefs, dest, flightDetails, carHire, selectedHotel, 
             <div className="card">
               <div className="flex items-center justify-between mb-3">
                 <h4 className="text-sm font-semibold text-slate">🗺️ Places in your itinerary</h4>
-                <button className="text-xs text-slate-3 hover:text-gold" onClick={() => setShowMap(false)}>✕</button>
+                <button className="text-xs text-slate-3 hover:text-sage" onClick={() => setShowMap(false)}>✕</button>
               </div>
               <div className="space-y-2 max-h-80 overflow-y-auto">
                 {mapPins.map((p,i) => (
@@ -688,7 +733,8 @@ export default function BookTab({
   flightDetails, setFlightDetails,
   carHire, setCarHire,
   selectedHotel, setSelectedHotel,
-  user, onSaveTrip,
+  user, userProfile, onSaveTrip,
+  externalShowModal, setExternalShowModal,
 }) {
   const [destInput, setDestInput] = useState(
     chosenDest ? `${chosenDest.CITY}, ${chosenDest.COUNTRY}` : ''
@@ -710,7 +756,7 @@ export default function BookTab({
           <div className="card-gold flex items-center justify-between">
             <div>
               <p className="text-slate-3 text-xs uppercase tracking-wider">Your destination</p>
-              <p className="font-serif text-xl text-gold mt-0.5">
+              <p className="font-serif text-xl text-sage mt-0.5">
                 {dest.EMOJI} {dest.CITY}{dest.COUNTRY ? `, ${dest.COUNTRY}` : ''}
               </p>
             </div>
@@ -792,7 +838,10 @@ export default function BookTab({
           itinerary={itinerary}
           setItinerary={setItinerary}
           user={user}
+          userProfile={userProfile}
           onSaveTrip={onSaveTrip}
+          externalShowModal={externalShowModal}
+          setExternalShowModal={setExternalShowModal}
         />
       </Section>
     </div>

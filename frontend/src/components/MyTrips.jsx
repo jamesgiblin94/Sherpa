@@ -44,7 +44,7 @@ export default function MyTrips({ onLoadTrip }) {
               <div className="flex items-center gap-2">
                 <span className="text-xl">{trip.emoji || '🌍'}</span>
                 <div>
-                  <h3 className="font-serif text-gold-light">
+                  <h3 className="font-serif text-sage-light">
                     {trip.destination}{trip.country ? `, ${trip.country}` : ''}
                   </h3>
                   <p className="text-xs text-slate-3">Saved {fmt(trip.updated_at)}</p>
@@ -74,7 +74,7 @@ export default function MyTrips({ onLoadTrip }) {
           {trip.itinerary && (
             <div className="mt-3">
               <button
-                className="text-xs text-gold hover:text-gold-light transition-colors"
+                className="text-xs text-sage hover:text-sage-light transition-colors"
                 onClick={() => setExpanded(expanded === trip.id ? null : trip.id)}
               >
                 {expanded === trip.id ? '▲ Hide itinerary' : '▼ Preview itinerary'}
@@ -82,7 +82,7 @@ export default function MyTrips({ onLoadTrip }) {
               {expanded === trip.id && (
                 <div className="mt-3 max-h-64 overflow-y-auto border-t border-white/8 pt-3
                   prose prose-invert prose-sm max-w-none
-                  prose-headings:font-serif prose-headings:text-gold-light
+                  prose-headings:font-serif prose-headings:text-sage-light
                   prose-p:text-slate prose-li:text-slate">
                   <ReactMarkdown>{trip.itinerary}</ReactMarkdown>
                 </div>
