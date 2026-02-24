@@ -3,6 +3,10 @@
     {
       "source": "/api/:path*",
       "destination": "https://sherpa-backend-ffpa.onrender.com/api/:path*"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
     }
   ]
 }
