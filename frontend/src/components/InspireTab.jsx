@@ -3,6 +3,7 @@ import { api } from '../utils/api'
 import SherpaSpinner from './SherpaSpinner'
 import DatePicker from 'react-datepicker'
 import 'react-datepicker/dist/react-datepicker.css'
+import { useUsageLimit } from '../hooks/useUsageLimit'
 
 const MONTHS = ['January','February','March','April','May','June',
                 'July','August','September','October','November','December']
@@ -14,6 +15,30 @@ const TRANSPORT = [
   { value: 'willing to rent',   label: '🚗 Open to car hire' },
   { value: 'public transport',  label: '🚇 Public transport only' },
 ]
+
+function getFirstThursdayToSunday(monthName) {
+  const months = ['January','February','March','April','May','June',
+                  'July','August','September','October','November','December']
+  const mIdx = months.indexOf(monthName)
+  if (mIdx < 0) return { depart: null, ret: null }
+
+  const now = new Date()
+  const year = now.getFullYear()
+  const useYear = mIdx < now.getMonth() ? year + 1 : year
+
+  // Find first Thursday (day 4) of the month
+  const d = new Date(useYear, mIdx, 1)
+  while (d.getDay() !== 4) d.setDate(d.getDate() + 1)
+
+  const sunday = new Date(d)
+  sunday.setDate(sunday.getDate() + 3)
+
+  const pad = n => String(n).padStart(2, '0')
+  return {
+    depart: `${useYear}-${pad(mIdx + 1)}-${pad(d.getDate())}`,
+    ret: `${useYear}-${pad(mIdx + 1)}-${pad(sunday.getDate())}`,
+  }
+}
 
 // Airport coordinates for nearest-airport detection
 const AIRPORT_COORDS = [
@@ -250,13 +275,15 @@ function DestCard({ dest, onChoose }) {
   )
 }
 
-export default function InspireTab({ prefs, setPrefs, inspireResults, setInspireResults, chosenDest, setChosenDest, onBook }) {
+export default function InspireTab({ prefs, setPrefs, inspireResults, setInspireResults, chosenDest, setChosenDest, onBook, user, onRequireAuth }) {
   const [loading, setLoading] = useState(false)
   const [error, setError]     = useState('')
   const [prefsOpen, setPrefsOpen] = useState(!inspireResults.length)
-  const [dateMode, setDateMode]   = useState('flexible')
+  const [dateMode, setDateMode]   = useState('specific')
   const [destPref, setDestPref]   = useState('')
   const [geoStatus, setGeoStatus] = useState('') // 'detecting' | 'found' | 'denied' | ''
+
+  const { remaining: inspireRemaining, limitReached: inspireLimitReached, increment: incrementInspire } = useUsageLimit('inspire')
 
   // Auto-detect nearest airport on first load (only if no airport already saved)
   useEffect(() => {
@@ -276,6 +303,16 @@ export default function InspireTab({ prefs, setPrefs, inspireResults, setInspire
 
   const update = (key, val) => setPrefs(p => ({ ...p, [key]: val }))
 
+  const handleMonthChange = (month) => {
+    const { depart, ret } = getFirstThursdayToSunday(month)
+    setPrefs(p => ({
+      ...p,
+      travelMonth: month,
+      specificDepart: depart,
+      specificReturn: ret,
+    }))
+  }
+
   const toggleTrip = (t) =>
     update('tripType', prefs.tripType.includes(t)
       ? prefs.tripType.filter(x => x !== t)
@@ -283,6 +320,13 @@ export default function InspireTab({ prefs, setPrefs, inspireResults, setInspire
 
   const handleInspire = async () => {
     if (!prefs.startingPoint) return
+
+    // Check usage limit for non-signed-in users
+    if (!user && inspireLimitReached) {
+      onRequireAuth()
+      return
+    }
+
     setLoading(true)
     setError('')
     try {
@@ -295,13 +339,16 @@ export default function InspireTab({ prefs, setPrefs, inspireResults, setInspire
         priorities:      prefs.priorities,
         num_adults:      Number(prefs.numAdults),
         dest_preference: destPref,
-        ...(dateMode === 'specific'
-          ? { specific_depart: prefs.specificDepart, specific_return: prefs.specificReturn }
-          : { travel_month: prefs.travelMonth }),
+        specific_depart: prefs.specificDepart,
+        specific_return: prefs.specificReturn,
+        ...(dateMode === 'flexible' ? { travel_month: prefs.travelMonth } : {}),
       }
       const data = await api.inspire(body)
       setInspireResults(data.destinations || [])
       setPrefsOpen(false)
+
+      // Count this usage for non-signed-in users
+      if (!user) incrementInspire()
     } catch (e) {
       setError(e.message)
     } finally {
@@ -366,6 +413,46 @@ export default function InspireTab({ prefs, setPrefs, inspireResults, setInspire
                 value={prefs.numAdults} onChange={e => update('numAdults', e.target.value)} />
             </div>
 
+            {/* Children — show for Family or Group with kids */}
+            {(prefs.groupType === 'Family' || prefs.groupType === 'Group with kids') && (
+              <div className="space-y-3">
+                <div>
+                  <label className="label">👶 Number of children</label>
+                  <input type="number" min={0} max={10} className="input w-24"
+                    value={prefs.numChildren || 0}
+                    onChange={e => {
+                      const num = Math.max(0, Math.min(10, parseInt(e.target.value) || 0))
+                      const ages = [...(prefs.childrenAges || [])]
+                      while (ages.length < num) ages.push(5)
+                      while (ages.length > num) ages.pop()
+                      setPrefs(p => ({ ...p, numChildren: num, childrenAges: ages }))
+                    }} />
+                </div>
+                {(prefs.numChildren > 0) && (
+                  <div>
+                    <label className="label">🎂 Children's ages</label>
+                    <div className="flex flex-wrap gap-2">
+                      {(prefs.childrenAges || []).map((age, i) => (
+                        <div key={i} className="flex items-center gap-1">
+                          <span className="text-xs" style={{color:'#7a7870'}}>Child {i + 1}</span>
+                          <select className="select w-20 text-sm" value={age}
+                            onChange={e => {
+                              const ages = [...prefs.childrenAges]
+                              ages[i] = parseInt(e.target.value)
+                              setPrefs(p => ({ ...p, childrenAges: ages }))
+                            }}>
+                            {Array.from({ length: 18 }, (_, a) => (
+                              <option key={a} value={a}>{a === 0 ? 'Under 1' : a}</option>
+                            ))}
+                          </select>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Trip types */}
             <div>
               <label className="label">🗺 Trip type (pick any)</label>
@@ -421,7 +508,7 @@ export default function InspireTab({ prefs, setPrefs, inspireResults, setInspire
             <div>
               <label className="label">📅 When</label>
               <div className="flex gap-2 mb-3">
-                {['flexible','specific'].map(m => (
+                {['specific','flexible'].map(m => (
                   <button
                     key={m}
                     onClick={() => setDateMode(m)}
@@ -436,12 +523,7 @@ export default function InspireTab({ prefs, setPrefs, inspireResults, setInspire
                 ))}
               </div>
 
-              {dateMode === 'flexible' ? (
-                <select className="select" value={prefs.travelMonth}
-                  onChange={e => update('travelMonth', e.target.value)}>
-                  {MONTHS.map(m => <option key={m} value={m}>{m}</option>)}
-                </select>
-              ) : (
+              {dateMode === 'specific' ? (
                 <div className="flex gap-3 items-center">
                   <div>
                     <label className="label">Depart</label>
@@ -469,6 +551,13 @@ export default function InspireTab({ prefs, setPrefs, inspireResults, setInspire
                     />
                   </div>
                 </div>
+              ) : (
+                <>
+                  <select className="select" value={prefs.travelMonth}
+                    onChange={e => handleMonthChange(e.target.value)}>
+                    {MONTHS.map(m => <option key={m} value={m}>{m}</option>)}
+                  </select>
+                </>
               )}
             </div>
 
@@ -496,6 +585,21 @@ export default function InspireTab({ prefs, setPrefs, inspireResults, setInspire
             >
               ✨ Inspire Me!
             </button>
+
+            {/* Usage remaining hint for non-signed-in users */}
+            {!user && !inspireLimitReached && (
+              <p className="text-xs text-center" style={{color:'#7a7870'}}>
+                {inspireRemaining} free {inspireRemaining === 1 ? 'search' : 'searches'} remaining — <button className="underline hover:text-sage transition-colors" onClick={onRequireAuth}>sign in</button> for unlimited
+              </p>
+            )}
+            {!user && inspireLimitReached && (
+              <div className="text-center p-3 rounded-lg" style={{background:'rgba(127,182,133,0.08)', border:'1px solid rgba(127,182,133,0.2)'}}>
+                <p className="text-sm" style={{color:'#c8c4bc'}}>You've used your free searches</p>
+                <button className="text-sm font-medium mt-1 underline transition-colors" style={{color:'#7fb685'}} onClick={onRequireAuth}>
+                  Sign in for unlimited access
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>

@@ -8,6 +8,9 @@ import AuthModal from './components/AuthModal'
 import MyTrips from './components/MyTrips'
 import ProfileSetup from './components/ProfileSetup'
 import AccountMenu from './components/AccountMenu'
+import { Routes, Route } from 'react-router-dom'
+import BlogIndex from './blog/BlogIndex'
+import BlogPost from './blog/BlogPost'
 import ItineraryModal from './components/ItineraryModal'
 import { api } from './utils/api'
 import { getProfile } from './utils/supabase'
@@ -34,6 +37,8 @@ export default function App() {
     specificDepart: null,
     specificReturn: null,
     numAdults:      2,
+    numChildren:    0,
+    childrenAges:   [],
   })
 
   const [inspireResults, setInspireResults] = useState([])
@@ -121,18 +126,22 @@ export default function App() {
     setModalActivities(null)
   }
 
+  const switchTab = (id) => {
+    setTab(id)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
   const tabs = [
     { id: 'inspire', label: '✨  Inspire' },
     { id: 'book',    label: '🗓️  Book'   },
     { id: 'trips',   label: '🧭  Trips'  },
   ]
 
-  const switchTab = (id) => {
-    setTab(id)
-    window.scrollTo({ top: 0, behavior: 'smooth' })
-  }
-
   return (
+    <Routes>
+      <Route path="/blog" element={<BlogIndex />} />
+      <Route path="/blog/:slug" element={<BlogPost />} />
+      <Route path="/*" element={(
     <div className="min-h-screen">
       <header className="sticky top-0 z-50" style={{background:'rgba(17,22,20,0.92)', backdropFilter:'blur(12px)', borderBottom:'1px solid rgba(127,182,133,0.1)'}}>
         <div className="max-w-4xl mx-auto px-4 py-4 flex items-center justify-between">
@@ -156,6 +165,13 @@ export default function App() {
                   {t.label}
                 </button>
               ))}
+              <a href="/blog"
+                className="px-4 py-2 rounded-lg text-sm font-medium transition-all"
+                style={{color:'#7a7870', border:'1px solid transparent'}}
+                onMouseEnter={e => e.target.style.color='#a8c9ad'}
+                onMouseLeave={e => e.target.style.color='#7a7870'}>
+                ✍️ Blog
+              </a>
             </nav>
             {user ? (
               <AccountMenu
@@ -197,6 +213,8 @@ export default function App() {
             inspireResults={inspireResults} setInspireResults={setInspireResults}
             chosenDest={chosenDest} setChosenDest={handleChooseDest}
             onBook={() => switchTab('book')}
+            user={user}
+            onRequireAuth={() => setShowAuth(true)}
           />
         )}
         {tab === 'book' && (
@@ -209,6 +227,7 @@ export default function App() {
             selectedHotel={selectedHotel} setSelectedHotel={setSelectedHotel}
             user={user} userProfile={userProfile} onSaveTrip={() => switchTab('trips')}
             externalShowModal={showItineraryModal} setExternalShowModal={setShowItineraryModal}
+            onRequireAuth={() => setShowAuth(true)}
           />
         )}
         {tab === 'trips' && (
@@ -264,5 +283,7 @@ export default function App() {
         />
       )}
     </div>
+    )} />
+    </Routes>
   )
 }

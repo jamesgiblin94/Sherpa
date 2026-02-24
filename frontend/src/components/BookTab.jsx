@@ -5,6 +5,7 @@ import ItineraryModal from './ItineraryModal'
 import DatePicker from 'react-datepicker'
 import { api } from '../utils/api'
 import SherpaSpinner from './SherpaSpinner'
+import { useUsageLimit } from '../hooks/useUsageLimit'
 
 // ── Small reusable pieces ────────────────────────────────────────────────────
 
@@ -78,7 +79,16 @@ function FlightSection({ prefs, dest, flightDetails, setFlightDetails }) {
 
   const skyUrl = (ap) => {
     if (!depart || !ret) return '#'
-    return `https://www.skyscanner.net/transport/flights/${originSky.toLowerCase()}/${(ap.sky||ap.iata||'').toLowerCase()}/${yymmdd(depart)}/${yymmdd(ret)}/?adults=${prefs.numAdults}`
+    let url = `https://www.skyscanner.net/transport/flights/${originSky.toLowerCase()}/${(ap.sky||ap.iata||'').toLowerCase()}/${yymmdd(depart)}/${yymmdd(ret)}/?adults=${prefs.numAdults}`
+    const numKids = prefs.numChildren || 0
+    if (numKids > 0) {
+      url += `&children=${numKids}`
+      const ages = prefs.childrenAges || []
+      if (ages.length > 0) {
+        url += `&childrenyoungest=${Math.min(...ages)}`
+      }
+    }
+    return url
   }
 
   const saveFlights = () => {
@@ -155,7 +165,7 @@ function FlightSection({ prefs, dest, flightDetails, setFlightDetails }) {
                 </p>
                 <div className="mt-2 space-y-1 text-sm text-slate">
                   {depart && ret && (
-                    <p>📅 {fmt(depart)} → {fmt(ret)} · 👤 {prefs.numAdults} passenger(s)</p>
+                    <p>📅 {fmt(depart)} → {fmt(ret)} · 👤 {prefs.numAdults} adult(s){(prefs.numChildren || 0) > 0 ? ` + ${prefs.numChildren} child(ren)` : ''}</p>
                   )}
                   {ap.flight_time && <p>✈️ Flight time: approx {ap.flight_time}</p>}
                   {carLeg.length > 0 && (
@@ -359,6 +369,11 @@ function AccomSection({ prefs, dest, carHire, selectedHotel, setSelectedHotel, f
       group_adults: prefs.numAdults || 2,
       no_rooms:     1,
     })
+    const numKids = prefs.numChildren || 0
+    if (numKids > 0) {
+      params.set('group_children', numKids)
+      ;(prefs.childrenAges || []).forEach(age => params.append('age', age))
+    }
     if (flightDetails?.outboundDate) params.set('checkin',  flightDetails.outboundDate)
     if (flightDetails?.returnDate)   params.set('checkout', flightDetails.returnDate)
     return `https://www.booking.com/searchresults.html?${params.toString()}`
@@ -472,7 +487,7 @@ function AccomSection({ prefs, dest, carHire, selectedHotel, setSelectedHotel, f
 
 // ── Itinerary section ────────────────────────────────────────────────────────
 
-function ItinerarySection({ prefs, dest, flightDetails, carHire, selectedHotel, itinerary, setItinerary, user, userProfile, onSaveTrip, externalShowModal, setExternalShowModal }) {
+function ItinerarySection({ prefs, dest, flightDetails, carHire, selectedHotel, itinerary, setItinerary, user, userProfile, onSaveTrip, externalShowModal, setExternalShowModal, onRequireAuth }) {
   const [loading,    setLoading]    = useState(false)
   const [feedback,   setFeedback]   = useState('')
   const [tweaking,   setTweaking]   = useState(false)
@@ -484,12 +499,21 @@ function ItinerarySection({ prefs, dest, flightDetails, carHire, selectedHotel, 
   const [saved,      setSaved]      = useState(false)
   const [showModal,  setShowModal]  = useState(false)
 
+  const { remaining: buildRemaining, limitReached: buildLimitReached, increment: incrementBuild } = useUsageLimit('itinerary')
+
   // Open modal when a trip is loaded externally (from MyTrips)
   const isModalOpen = showModal || !!externalShowModal
   const closeModal  = () => { setShowModal(false); if (setExternalShowModal) setExternalShowModal(false) }
 
   const buildItinerary = async () => {
     if (!dest) return
+
+    // Check usage limit for non-signed-in users
+    if (!user && buildLimitReached) {
+      onRequireAuth()
+      return
+    }
+
     setLoading(true)
     setItinerary('')
     try {
@@ -520,6 +544,8 @@ function ItinerarySection({ prefs, dest, flightDetails, carHire, selectedHotel, 
     } finally {
       setLoading(false)
       setShowModal(true)
+      // Count this usage for non-signed-in users
+      if (!user) incrementBuild()
     }
   }
 
@@ -589,8 +615,9 @@ function ItinerarySection({ prefs, dest, flightDetails, carHire, selectedHotel, 
 
   if (!dest) return null
 
+  const isPublicTransport = prefs.transportMode === 'public transport only'
   const flightsDone  = !!(flightDetails?.confirmed && flightDetails?.outboundDate && flightDetails?.returnDate)
-  const carHireDone  = !!(carHire?.confirmed !== null && carHire?.confirmed !== undefined)
+  const carHireDone  = isPublicTransport || !!(carHire?.confirmed !== null && carHire?.confirmed !== undefined)
   const hotelDone    = !!(selectedHotel?.trim())
   const allDone      = flightsDone && carHireDone && hotelDone
 
@@ -603,7 +630,7 @@ function ItinerarySection({ prefs, dest, flightDetails, carHire, selectedHotel, 
           <p className="text-xs font-semibold uppercase tracking-widest mb-3" style={{color:'#7a7870'}}>Complete to build your plan</p>
           {[
             { done: flightsDone, label: 'Confirm your flight dates' },
-            { done: carHireDone, label: 'Choose car hire — yes or no' },
+            ...(!isPublicTransport ? [{ done: carHireDone, label: 'Choose car hire — yes or no' }] : []),
             { done: hotelDone,   label: 'Enter where you\'re staying' },
           ].map(({ done, label }) => (
             <div key={label} className="flex items-center gap-2.5">
@@ -630,6 +657,21 @@ function ItinerarySection({ prefs, dest, flightDetails, carHire, selectedHotel, 
       >
         {loading ? '⏳ Building your plan…' : `🗓️ ${itinerary ? 'Rebuild' : 'Build'} My Full Plan`}
       </button>
+
+      {/* Usage remaining hint for non-signed-in users */}
+      {!user && !buildLimitReached && (
+        <p className="text-xs text-center" style={{color:'#7a7870'}}>
+          {buildRemaining} free {buildRemaining === 1 ? 'build' : 'builds'} remaining — <button className="underline hover:text-sage transition-colors" onClick={onRequireAuth}>sign in</button> for unlimited
+        </p>
+      )}
+      {!user && buildLimitReached && (
+        <div className="text-center p-3 rounded-lg" style={{background:'rgba(127,182,133,0.08)', border:'1px solid rgba(127,182,133,0.2)'}}>
+          <p className="text-sm" style={{color:'#c8c4bc'}}>You've used your free builds</p>
+          <button className="text-sm font-medium mt-1 underline transition-colors" style={{color:'#7fb685'}} onClick={onRequireAuth}>
+            Sign in for unlimited access
+          </button>
+        </div>
+      )}
 
       {/* Loading spinner */}
       {loading && (
@@ -683,12 +725,24 @@ function ItinerarySection({ prefs, dest, flightDetails, carHire, selectedHotel, 
                 const yymmdd = (iso) => iso ? iso.replace(/-/g,'').slice(2) : ''
                 const originSky = prefs.startingPoint?.match(/\(([A-Z]{3})\)/)?.[1]?.toLowerCase() || 'lon'
                 if (!depart || !ret) return '#'
-                return `https://www.skyscanner.net/transport/flights/${originSky}/${(ap.sky||ap.iata||'').toLowerCase()}/${yymmdd(depart)}/${yymmdd(ret)}/?adults=${prefs.numAdults}`
+                let url = `https://www.skyscanner.net/transport/flights/${originSky}/${(ap.sky||ap.iata||'').toLowerCase()}/${yymmdd(depart)}/${yymmdd(ret)}/?adults=${prefs.numAdults}`
+                const numKids = prefs.numChildren || 0
+                if (numKids > 0) {
+                  url += `&children=${numKids}`
+                  const ages = prefs.childrenAges || []
+                  if (ages.length > 0) url += `&childrenyoungest=${Math.min(...ages)}`
+                }
+                return url
               })()
             : null}
           bookingUrl={(() => {
             if (!dest) return null
             const params = new URLSearchParams({ ss: dest.CITY, lang: 'en-gb', group_adults: prefs.numAdults || 2, no_rooms: 1 })
+            const numKids = prefs.numChildren || 0
+            if (numKids > 0) {
+              params.set('group_children', numKids)
+              ;(prefs.childrenAges || []).forEach(age => params.append('age', age))
+            }
             if (flightDetails?.outboundDate) params.set('checkin', flightDetails.outboundDate)
             if (flightDetails?.returnDate)   params.set('checkout', flightDetails.returnDate)
             return `https://www.booking.com/searchresults.html?${params.toString()}`
@@ -756,6 +810,7 @@ export default function BookTab({
   selectedHotel, setSelectedHotel,
   user, userProfile, onSaveTrip,
   externalShowModal, setExternalShowModal,
+  onRequireAuth,
 }) {
   const [destInput, setDestInput] = useState(
     chosenDest ? `${chosenDest.CITY}, ${chosenDest.COUNTRY}` : ''
@@ -818,7 +873,7 @@ export default function BookTab({
 
       <div className="divider" />
 
-      {/* Car hire */}
+      {/* Car hire — only show when NOT public transport only */}
       {prefs.transportMode !== 'public transport only' && (
         <>
           <Section title="🚗 Car Hire">
@@ -863,6 +918,7 @@ export default function BookTab({
           onSaveTrip={onSaveTrip}
           externalShowModal={externalShowModal}
           setExternalShowModal={setExternalShowModal}
+          onRequireAuth={onRequireAuth}
         />
       </Section>
     </div>
