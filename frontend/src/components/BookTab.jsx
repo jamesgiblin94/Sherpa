@@ -6,6 +6,7 @@ import DatePicker from 'react-datepicker'
 import { api } from '../utils/api'
 import SherpaSpinner from './SherpaSpinner'
 import { useUsageLimit } from '../hooks/useUsageLimit'
+import { track } from '../utils/analytics'
 
 // ── Small reusable pieces ────────────────────────────────────────────────────
 
@@ -79,14 +80,11 @@ function FlightSection({ prefs, dest, flightDetails, setFlightDetails }) {
 
   const skyUrl = (ap) => {
     if (!depart || !ret) return '#'
-    let url = `https://www.skyscanner.net/transport/flights/${originSky.toLowerCase()}/${(ap.sky||ap.iata||'').toLowerCase()}/${yymmdd(depart)}/${yymmdd(ret)}/?adults=${prefs.numAdults}`
-    const numKids = prefs.numChildren || 0
-    if (numKids > 0) {
-      url += `&children=${numKids}`
-      const ages = prefs.childrenAges || []
-      if (ages.length > 0) {
-        url += `&childrenyoungest=${Math.min(...ages)}`
-      }
+    const adults = Number(prefs.numAdults) || 2
+    const ages = prefs.childrenAges || []
+    let url = `https://www.skyscanner.net/transport/flights/${originSky.toLowerCase()}/${(ap.sky||ap.iata||'').toLowerCase()}/${yymmdd(depart)}/${yymmdd(ret)}/?adultsv2=${adults}&cabinclass=economy`
+    if (ages.length > 0) {
+      url += `&childrenv2=${ages.join('|')}`
     }
     return url
   }
@@ -186,6 +184,7 @@ function FlightSection({ prefs, dest, flightDetails, setFlightDetails }) {
                 href={skyUrl(ap)}
                 target="_blank" rel="noopener noreferrer"
                 className="btn-primary text-sm whitespace-nowrap shrink-0"
+                onClick={() => track('affiliate_click', { partner: 'skyscanner', destination: dest.CITY })}
               >
                 Search Skyscanner →
               </a>
@@ -311,7 +310,8 @@ function CarHireSection({ prefs, dest, flightDetails, carHire, setCarHire }) {
           {carHire.confirmed === 'yes' && (
             <>
               <a href={rcUrl} target="_blank" rel="noopener noreferrer"
-                 className="btn-primary block text-center w-full">
+                 className="btn-primary block text-center w-full"
+                 onClick={() => track('affiliate_click', { partner: 'rentalcars', destination: dest.CITY })}>
                 🚗 Compare prices on Rentalcars →
               </a>
 
@@ -366,7 +366,7 @@ function AccomSection({ prefs, dest, carHire, selectedHotel, setSelectedHotel, f
       ss:           dest.CITY,
       lang:         'en-gb',
       // aid: '304142', // add when Booking.com affiliate approved
-      group_adults: prefs.numAdults || 2,
+      group_adults: Number(prefs.numAdults) || 2,
       no_rooms:     1,
     })
     const numKids = prefs.numChildren || 0
@@ -417,7 +417,8 @@ function AccomSection({ prefs, dest, carHire, selectedHotel, setSelectedHotel, f
 
   return (
     <div className="space-y-4">
-      <a href={bkUrl} target="_blank" rel="noopener noreferrer" className="btn-primary block text-center w-full">
+      <a href={bkUrl} target="_blank" rel="noopener noreferrer" className="btn-primary block text-center w-full"
+         onClick={() => track('affiliate_click', { partner: 'booking', destination: dest.CITY })}>
         🏨 Explore hotels on Booking.com →
       </a>
 
@@ -544,6 +545,7 @@ function ItinerarySection({ prefs, dest, flightDetails, carHire, selectedHotel, 
     } finally {
       setLoading(false)
       setShowModal(true)
+      track('itinerary_build', { destination: dest.CITY, country: dest.COUNTRY })
       // Count this usage for non-signed-in users
       if (!user) incrementBuild()
     }
@@ -605,6 +607,7 @@ function ItinerarySection({ prefs, dest, flightDetails, carHire, selectedHotel, 
       })
       setSaved(true)
       setTimeout(() => setSaved(false), 3000)
+      track('trip_saved', { destination: dest.CITY, country: dest.COUNTRY })
       if (onSaveTrip) onSaveTrip()
     } catch (e) {
       alert('Could not save trip: ' + e.message)
@@ -615,7 +618,7 @@ function ItinerarySection({ prefs, dest, flightDetails, carHire, selectedHotel, 
 
   if (!dest) return null
 
-  const isPublicTransport = prefs.transportMode === 'public transport only'
+  const isPublicTransport = prefs.transportMode.includes('public transport')
   const flightsDone  = !!(flightDetails?.confirmed && flightDetails?.outboundDate && flightDetails?.returnDate)
   const carHireDone  = isPublicTransport || !!(carHire?.confirmed !== null && carHire?.confirmed !== undefined)
   const hotelDone    = !!(selectedHotel?.trim())
@@ -725,19 +728,18 @@ function ItinerarySection({ prefs, dest, flightDetails, carHire, selectedHotel, 
                 const yymmdd = (iso) => iso ? iso.replace(/-/g,'').slice(2) : ''
                 const originSky = prefs.startingPoint?.match(/\(([A-Z]{3})\)/)?.[1]?.toLowerCase() || 'lon'
                 if (!depart || !ret) return '#'
-                let url = `https://www.skyscanner.net/transport/flights/${originSky}/${(ap.sky||ap.iata||'').toLowerCase()}/${yymmdd(depart)}/${yymmdd(ret)}/?adults=${prefs.numAdults}`
-                const numKids = prefs.numChildren || 0
-                if (numKids > 0) {
-                  url += `&children=${numKids}`
-                  const ages = prefs.childrenAges || []
-                  if (ages.length > 0) url += `&childrenyoungest=${Math.min(...ages)}`
+                const adults = Number(prefs.numAdults) || 2
+                const ages = prefs.childrenAges || []
+                let url = `https://www.skyscanner.net/transport/flights/${originSky}/${(ap.sky||ap.iata||'').toLowerCase()}/${yymmdd(depart)}/${yymmdd(ret)}/?adultsv2=${adults}&cabinclass=economy`
+                if (ages.length > 0) {
+                  url += `&childrenv2=${ages.join('|')}`
                 }
                 return url
               })()
             : null}
           bookingUrl={(() => {
             if (!dest) return null
-            const params = new URLSearchParams({ ss: dest.CITY, lang: 'en-gb', group_adults: prefs.numAdults || 2, no_rooms: 1 })
+            const params = new URLSearchParams({ ss: dest.CITY, lang: 'en-gb', group_adults: Number(prefs.numAdults) || 2, no_rooms: 1 })
             const numKids = prefs.numChildren || 0
             if (numKids > 0) {
               params.set('group_children', numKids)
@@ -873,8 +875,8 @@ export default function BookTab({
 
       <div className="divider" />
 
-      {/* Car hire — only show when NOT public transport only */}
-      {prefs.transportMode !== 'public transport only' && (
+      {/* Car hire — only show when NOT public transport */}
+      {!prefs.transportMode.includes('public transport') && (
         <>
           <Section title="🚗 Car Hire">
             <CarHireSection

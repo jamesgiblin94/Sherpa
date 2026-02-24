@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { signIn, signUp } from '../utils/supabase'
+import { track } from '../utils/analytics'
 
 export default function AuthModal({ onClose, onSuccess }) {
   const [mode,     setMode]     = useState('signin') // 'signin' | 'signup'
@@ -17,10 +18,12 @@ export default function AuthModal({ onClose, onSuccess }) {
     try {
       if (mode === 'signup') {
         await signUp(email, password)
+        track('sign_up', { method: 'email' })
         setSuccess('Account created! Check your email to confirm, then sign in.')
         setMode('signin')
       } else {
         await signIn(email, password)
+        track('sign_in', { method: 'email' })
         onSuccess()
         onClose()
       }

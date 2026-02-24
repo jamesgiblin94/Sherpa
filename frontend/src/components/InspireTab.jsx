@@ -4,6 +4,7 @@ import SherpaSpinner from './SherpaSpinner'
 import DatePicker from 'react-datepicker'
 import 'react-datepicker/dist/react-datepicker.css'
 import { useUsageLimit } from '../hooks/useUsageLimit'
+import { track } from '../utils/analytics'
 
 const MONTHS = ['January','February','March','April','May','June',
                 'July','August','September','October','November','December']
@@ -347,6 +348,12 @@ export default function InspireTab({ prefs, setPrefs, inspireResults, setInspire
       setInspireResults(data.destinations || [])
       setPrefsOpen(false)
 
+      track('inspire_search', {
+        budget: prefs.budget,
+        group_type: prefs.groupType,
+        transport: prefs.transportMode,
+      })
+
       // Count this usage for non-signed-in users
       if (!user) incrementInspire()
     } catch (e) {
@@ -357,6 +364,7 @@ export default function InspireTab({ prefs, setPrefs, inspireResults, setInspire
   }
 
   const handleChoose = (dest) => {
+    track('destination_chosen', { city: dest.CITY, country: dest.COUNTRY })
     setChosenDest(dest)
     onBook()
   }

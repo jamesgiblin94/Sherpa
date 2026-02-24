@@ -1,16 +1,9 @@
 import { useState, useRef, useEffect } from 'react'
 import SherpaSpinner from './SherpaSpinner'
 import { api } from '../utils/api'
+import { track } from '../utils/analytics'
 
 // ── Parser ─────────────────────────────────────────────────────────────────────
-// Handles Claude's exact format:
-//   ## ✈️ Getting There  /  ## Day 1 — Title  /  ## 💰 Cost Guide  /  ## 📌 Local Tips
-//   **🌅 Morning:** inline text...
-//   **🍽️ Lunch:**
-//   **Restaurant Name** | Location | Type
-//   Detail lines...
-//   **☀️ Afternoon:** inline text
-
 const IS_TIME  = /^(morning|afternoon|evening|night|late afternoon|early evening)/i
 const IS_MEAL  = /^(breakfast|lunch|dinner|brunch|supper)/i
 const IS_DAY   = /^##\s+(Day\s*\d+[^#\n]*)/i
@@ -20,7 +13,6 @@ const IS_COST  = /^##.*Cost/i
 const IS_TIPS  = /^##.*Local Tips/i
 
 function stripLeadingEmoji(s) {
-  // Remove emoji + variation selectors from the start
   return s.replace(/^[\p{Emoji}\uFE0F\u20E3\s]+/u, '').trim()
 }
 
@@ -36,8 +28,8 @@ function parseDays(markdown) {
   const days = []
 
   let currentDay   = null
-  let currentBlock = null   // time/activity block
-  let pendingMeal  = null   // waiting for restaurant name
+  let currentBlock = null
+  let pendingMeal  = null
   let otherSection = null
 
   const pushBlock = (b) => { if (b && currentDay) currentDay.blocks.push(b) }
@@ -51,7 +43,6 @@ function parseDays(markdown) {
     const line = raw.trim()
     if (!line || line === '---' || line === '***') continue
 
-    // ── Section routing ──
     if (IS_GT.test(line))   { flush(); otherSection = 'getting_there'; currentDay = null; continue }
     if (IS_GH.test(line))   { flush(); otherSection = 'getting_home';  currentDay = null; continue }
     if (IS_COST.test(line)) { flush(); otherSection = 'cost';          currentDay = null; continue }
@@ -74,7 +65,6 @@ function parseDays(markdown) {
 
     if (!currentDay) continue
 
-    // ── Bold line: **...** or **...:** text ──
     const boldM = line.match(/^\*\*(.+?)\*\*:?\s*(.*)$/)
     if (boldM) {
       const rawTitle   = boldM[1].trim()
@@ -83,33 +73,24 @@ function parseDays(markdown) {
       const icon       = leadingEmoji(rawTitle)
 
       if (IS_TIME.test(cleanTitle)) {
-        // Morning / Afternoon / Evening
         flush()
         currentBlock = { isTime: true, title: cleanTitle, icon, details: afterColon ? [afterColon] : [] }
-
       } else if (IS_MEAL.test(cleanTitle)) {
-        // Lunch / Dinner — open a pending meal card
         flush()
         pendingMeal = { isMeal: true, mealType: cleanTitle, icon, restaurantName: null, subtitle: null, details: afterColon ? [afterColon] : [] }
-
       } else if (pendingMeal && !pendingMeal.restaurantName) {
-        // First bold after a meal header = restaurant name
         pendingMeal.restaurantName = cleanTitle
         if (afterColon) pendingMeal.details.push(afterColon)
-
       } else {
-        // Regular activity/place
         flush()
         currentBlock = { isActivity: true, title: cleanTitle, icon, details: afterColon ? [afterColon] : [] }
       }
       continue
     }
 
-    // ── Regular / pipe line ──
     const clean = line.replace(/^[-•*]\s*/, '').replace(/\*\*/g, '').trim()
     if (!clean) continue
 
-    // Pipe line like "| Stari trg | Vegan café" — treat as subtitle of pending meal
     if (clean.startsWith('|') && pendingMeal) {
       pendingMeal.subtitle = clean.replace(/\|/g, '·').replace(/·\s*·/g, '·').trim().replace(/^·|·$/g, '').trim()
       continue
@@ -123,7 +104,6 @@ function parseDays(markdown) {
   return { days, sections }
 }
 
-// Parse cost lines into structured rows
 function parseCost(lines) {
   return lines.map(l => {
     const m = l.match(/^(.+?):\s*(.+)$/)
@@ -132,55 +112,35 @@ function parseCost(lines) {
   })
 }
 
-// ── Block renderer — every block is the same card shape ───────────────────────
+// ── Block renderer ────────────────────────────────────────────────────────────
 function Block({ block }) {
-  // Determine label, title, icon for every block type
   let label, title, icon, subtitle
 
   if (block.isTime) {
-    label    = block.title   // e.g. "Morning"
-    title    = null
-    icon     = block.icon
-    subtitle = null
+    label = block.title; title = null; icon = block.icon; subtitle = null
   } else if (block.isMeal) {
-    label    = block.mealType        // e.g. "Lunch"
-    title    = block.restaurantName  // e.g. "Lavinia Good Food"
-    icon     = block.icon
-    subtitle = block.subtitle
+    label = block.mealType; title = block.restaurantName; icon = block.icon; subtitle = block.subtitle
   } else {
-    label    = null
-    title    = block.title
-    icon     = block.icon
-    subtitle = block.subtitle || null
+    label = null; title = block.title; icon = block.icon; subtitle = block.subtitle || null
   }
 
   return (
     <div className="rounded-xl p-4 mb-3" style={{
-      background: '#1a2020',
-      border: '1px solid rgba(127,182,133,0.15)',
+      background: '#1a2020', border: '1px solid rgba(127,182,133,0.15)',
     }}>
-      {/* Label row — always gold, uppercase, small */}
       {label && (
         <div className="flex items-center gap-1.5 mb-2">
           {icon && <span className="text-sm leading-none">{icon}</span>}
           <span className="text-xs font-bold uppercase tracking-widest" style={{color:'#7fb685'}}>{label}</span>
         </div>
       )}
-
-      {/* Title row */}
       {title && (
         <div className="flex items-start gap-2 mb-1">
           {!label && icon && <span className="shrink-0 text-base leading-tight">{icon}</span>}
           <p className="font-semibold text-sm leading-snug" style={{color:'#f0ede8'}}>{title}</p>
         </div>
       )}
-
-      {/* Subtitle — location / type */}
-      {subtitle && (
-        <p className="text-xs mb-1.5" style={{color:'#7a7870'}}>{subtitle}</p>
-      )}
-
-      {/* Detail lines */}
+      {subtitle && <p className="text-xs mb-1.5" style={{color:'#7a7870'}}>{subtitle}</p>}
       {block.details.map((d, i) => (
         <p key={i} className="text-sm leading-relaxed mt-1" style={{color:'#a0a098'}}>{d}</p>
       ))}
@@ -209,7 +169,6 @@ function CostGuide({ lines }) {
   const rest  = rows.filter(r => r !== total && r.label)
   return (
     <div className="rounded-xl overflow-hidden" style={{border:'1px solid rgba(127,182,133,0.25)'}}>
-      {/* Total first — most important number */}
       {total && (
         <div className="px-4 py-4 flex items-center justify-between"
              style={{background:'linear-gradient(135deg, rgba(127,182,133,0.2) 0%, rgba(127,182,133,0.08) 100%)'}}>
@@ -221,7 +180,6 @@ function CostGuide({ lines }) {
           <span className="text-3xl">💰</span>
         </div>
       )}
-      {/* Breakdown */}
       <div style={{background:'#1a2020'}}>
         <p className="px-4 pt-3 pb-1 text-xs uppercase tracking-widest" style={{color:'#7a7870'}}>Breakdown</p>
         {rest.map((r, i) => (
@@ -237,10 +195,6 @@ function CostGuide({ lines }) {
   )
 }
 
-// ── Main Modal ─────────────────────────────────────────────────────────────────
-
-
-
 // ── Day photo ──────────────────────────────────────────────────────────────────
 const DAY_PHOTO_CACHE = {}
 
@@ -249,19 +203,14 @@ function DayPhoto({ day, destCity }) {
 
   useEffect(() => {
     if (!day || !destCity) return
-    // Build query from day title or first activity block
     const firstActivity = day.blocks?.find(b => !b.isTime && b.title)?.title || ''
-    const query = firstActivity
-      ? `${destCity} ${firstActivity}`
-      : `${destCity} travel`
+    const query = firstActivity ? `${destCity} ${firstActivity}` : `${destCity} travel`
     const cacheKey = query
 
     if (DAY_PHOTO_CACHE[cacheKey]) { setPhoto(DAY_PHOTO_CACHE[cacheKey]); return }
 
     api.photo(query)
-      .then(p => {
-        if (p?.url) { DAY_PHOTO_CACHE[cacheKey] = p; setPhoto(p) }
-      })
+      .then(p => { if (p?.url) { DAY_PHOTO_CACHE[cacheKey] = p; setPhoto(p) } })
       .catch(() => {})
   }, [day?.title, destCity])
 
@@ -269,14 +218,11 @@ function DayPhoto({ day, destCity }) {
 
   return (
     <div className="relative rounded-xl overflow-hidden mb-4" style={{height: 160}}>
-      <img src={photo.url} alt=""
-           className="w-full h-full object-cover"
-           style={{filter:'brightness(0.75)'}} />
+      <img src={photo.url} alt="" className="w-full h-full object-cover" style={{filter:'brightness(0.75)'}} />
       <div className="absolute inset-0" style={{background:'linear-gradient(to top, #111614 0%, transparent 60%)'}} />
       {photo.credit && (
         <a href={photo.credit_url} target="_blank" rel="noopener noreferrer"
-           className="absolute bottom-2 right-2 text-xs"
-           style={{color:'rgba(255,255,255,0.4)'}}>
+           className="absolute bottom-2 right-2 text-xs" style={{color:'rgba(255,255,255,0.4)'}}>
           📷 {photo.credit}
         </a>
       )}
@@ -297,23 +243,18 @@ function VenueCard({ venue, typeIcon, destCity }) {
   return (
     <div className="px-4 py-3">
       <div className="flex items-start gap-3">
-        {/* Photo thumbnail */}
-        <div className="shrink-0 rounded-lg overflow-hidden"
-             style={{width:56, height:56, background:'#222b28'}}>
+        <div className="shrink-0 rounded-lg overflow-hidden" style={{width:56, height:56, background:'#222b28'}}>
           {photo
-            ? <img src={photo.thumb || photo.url} alt={venue.name}
-                   className="w-full h-full object-cover" style={{filter:'brightness(0.9)'}} />
+            ? <img src={photo.thumb || photo.url} alt={venue.name} className="w-full h-full object-cover" style={{filter:'brightness(0.9)'}} />
             : <div className="w-full h-full flex items-center justify-center text-xl">{typeIcon}</div>
           }
         </div>
-        {/* Info */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 mb-0.5">
             <p className="font-medium text-sm truncate" style={{color:'#f0ede8'}}>{venue.name}</p>
           </div>
           <p className="text-xs leading-relaxed" style={{color:'#a0a098'}}>{venue.note}</p>
         </div>
-        {/* Instagram button */}
         <a href={venue.instagram_url} target="_blank" rel="noopener noreferrer"
            className="shrink-0 text-xs px-2.5 py-1.5 rounded-lg whitespace-nowrap flex items-center gap-1"
            style={{background:'rgba(131,58,180,0.12)', color:'#c084fc', border:'1px solid rgba(131,58,180,0.25)'}}>
@@ -352,6 +293,495 @@ function LanguagePhrase({ dest, phrase }) {
   )
 }
 
+// ── Map category config ────────────────────────────────────────────────────────
+const CATEGORY_CONFIG = {
+  Restaurant: { color: '#f97316', bg: 'rgba(249,115,22,0.15)', border: 'rgba(249,115,22,0.3)', icon: '🍽️', label: 'Restaurants' },
+  Cafe:       { color: '#d97706', bg: 'rgba(217,119,6,0.15)',  border: 'rgba(217,119,6,0.3)',  icon: '☕',  label: 'Cafes' },
+  Bar:        { color: '#a855f7', bg: 'rgba(168,85,247,0.15)', border: 'rgba(168,85,247,0.3)', icon: '🍸',  label: 'Bars' },
+  Museum:     { color: '#3b82f6', bg: 'rgba(59,130,246,0.15)', border: 'rgba(59,130,246,0.3)', icon: '🏛️', label: 'Museums' },
+  Attraction: { color: '#eab308', bg: 'rgba(234,179,8,0.15)',  border: 'rgba(234,179,8,0.3)',  icon: '⭐',  label: 'Attractions' },
+  Market:     { color: '#22c55e', bg: 'rgba(34,197,94,0.15)',  border: 'rgba(34,197,94,0.3)',  icon: '🛒',  label: 'Markets' },
+  Park:       { color: '#10b981', bg: 'rgba(16,185,129,0.15)', border: 'rgba(16,185,129,0.3)', icon: '🌿',  label: 'Parks' },
+  Viewpoint:  { color: '#06b6d4', bg: 'rgba(6,182,212,0.15)',  border: 'rgba(6,182,212,0.3)',  icon: '👁️', label: 'Viewpoints' },
+  Beach:      { color: '#14b8a6', bg: 'rgba(20,184,166,0.15)', border: 'rgba(20,184,166,0.3)', icon: '🏖️', label: 'Beaches' },
+  Hotel:      { color: '#ef4444', bg: 'rgba(239,68,68,0.15)',  border: 'rgba(239,68,68,0.3)',  icon: '🏨',  label: 'Hotels' },
+}
+
+const DEFAULT_CAT = { color: '#a0a098', bg: 'rgba(160,160,152,0.15)', border: 'rgba(160,160,152,0.3)', icon: '📍', label: 'Other' }
+
+function getCat(type) {
+  return CATEGORY_CONFIG[type] || DEFAULT_CAT
+}
+
+function groupByCategory(pins) {
+  const groups = {}
+  for (const pin of pins) {
+    const cat = pin.type || 'Other'
+    if (!groups[cat]) groups[cat] = []
+    groups[cat].push(pin)
+  }
+  return groups
+}
+
+function pinMapsUrl(name, city) {
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(name + ' ' + city)}`
+}
+
+// ── Geocode using Nominatim (free, no API key) ────────────────────────────────
+const GEOCODE_CACHE = {}
+
+async function geocodePin(name, city) {
+  const key = `${name}|${city}`
+  if (GEOCODE_CACHE[key]) return GEOCODE_CACHE[key]
+
+  try {
+    const q = encodeURIComponent(`${name}, ${city}`)
+    const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=1`, {
+      headers: { 'Accept-Language': 'en' }
+    })
+    const data = await res.json()
+    if (data.length > 0) {
+      const result = { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) }
+      GEOCODE_CACHE[key] = result
+      return result
+    }
+  } catch {}
+
+  try {
+    const q = encodeURIComponent(name)
+    const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=1`, {
+      headers: { 'Accept-Language': 'en' }
+    })
+    const data = await res.json()
+    if (data.length > 0) {
+      const result = { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) }
+      GEOCODE_CACHE[key] = result
+      return result
+    }
+  } catch {}
+
+  return null
+}
+
+async function geocodeAllPins(pins, city) {
+  const results = []
+  for (const pin of pins) {
+    const coords = await geocodePin(pin.name, city)
+    if (coords) {
+      results.push({ ...pin, lat: coords.lat, lng: coords.lng })
+    } else {
+      results.push({ ...pin, lat: null, lng: null })
+    }
+    await new Promise(r => setTimeout(r, 300))
+  }
+  return results
+}
+
+// ── KML file generation ────────────────────────────────────────────────────────
+function generateKML(pins, city, emoji) {
+  const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+  function hexToKml(hex) {
+    const r = hex.slice(1, 3)
+    const g = hex.slice(3, 5)
+    const b = hex.slice(5, 7)
+    return `ff${b}${g}${r}`
+  }
+
+  const validPins = pins.filter(p => p.lat && p.lng)
+
+  let kml = `<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+<Document>
+  <name>${esc(emoji + ' ' + city + ' Itinerary')}</name>
+  <description>Generated by Sherpa - sherpatravel.uk</description>
+`
+
+  const usedCats = [...new Set(validPins.map(p => p.type || 'Other'))]
+  for (const cat of usedCats) {
+    const cfg = getCat(cat)
+    kml += `  <Style id="style-${esc(cat)}">
+    <IconStyle>
+      <color>${hexToKml(cfg.color)}</color>
+      <scale>1.2</scale>
+      <Icon>
+        <href>https://maps.google.com/mapfiles/kml/paddle/${cfg.color.replace('#', '').toUpperCase().slice(0,2)}.png</href>
+      </Icon>
+    </IconStyle>
+    <LabelStyle>
+      <color>${hexToKml(cfg.color)}</color>
+    </LabelStyle>
+  </Style>
+`
+  }
+
+  for (const cat of usedCats) {
+    const cfg = getCat(cat)
+    const catPins = validPins.filter(p => (p.type || 'Other') === cat)
+    kml += `  <Folder>
+    <name>${esc(cfg.icon + ' ' + cfg.label)}</name>
+`
+    for (const pin of catPins) {
+      kml += `    <Placemark>
+      <name>${esc(pin.name)}</name>
+      <description>${esc(pin.description || '')}</description>
+      <styleUrl>#style-${esc(cat)}</styleUrl>
+      <Point>
+        <coordinates>${pin.lng},${pin.lat},0</coordinates>
+      </Point>
+    </Placemark>
+`
+    }
+    kml += `  </Folder>
+`
+  }
+
+  kml += `</Document>
+</kml>`
+
+  return kml
+}
+
+function downloadKML(pins, city, emoji, destCity) {
+  track('map_export', { format: 'kml', destination: destCity })
+  const kml = generateKML(pins, city, emoji)
+  const blob = new Blob([kml], { type: 'application/vnd.google-earth.kml+xml' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${city.toLowerCase().replace(/\s+/g, '-')}-itinerary.kml`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
+
+// ── Map Pin Card ───────────────────────────────────────────────────────────────
+function MapPinCard({ pin, city }) {
+  const cat = getCat(pin.type)
+  const hasCoords = pin.lat && pin.lng
+  return (
+    <a href={pinMapsUrl(pin.name, city)} target="_blank" rel="noopener noreferrer"
+       className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all"
+       style={{ background: cat.bg, border: `1px solid ${cat.border}` }}
+       onMouseEnter={e => { e.currentTarget.style.transform = 'translateX(4px)'; e.currentTarget.style.borderColor = cat.color }}
+       onMouseLeave={e => { e.currentTarget.style.transform = 'translateX(0)'; e.currentTarget.style.borderColor = cat.border }}>
+      <span className="text-lg shrink-0">{cat.icon}</span>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium truncate" style={{color:'#f0ede8'}}>{pin.name}</p>
+        {pin.description && (
+          <p className="text-xs truncate" style={{color: cat.color}}>{pin.description}</p>
+        )}
+      </div>
+      {!hasCoords && <span className="text-xs shrink-0" style={{color:'#7a7870'}}>📍</span>}
+      <span className="text-xs shrink-0" style={{color:'#7a7870'}}>Open ↗</span>
+    </a>
+  )
+}
+
+// ── Leaflet Map Component ──────────────────────────────────────────────────────
+function LeafletMap({ pins, city }) {
+  const mapRef = useRef(null)
+  const mapInstanceRef = useRef(null)
+
+  useEffect(() => {
+    if (!document.getElementById('leaflet-css')) {
+      const link = document.createElement('link')
+      link.id = 'leaflet-css'
+      link.rel = 'stylesheet'
+      link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'
+      document.head.appendChild(link)
+    }
+
+    const loadLeaflet = () => {
+      return new Promise((resolve) => {
+        if (window.L) { resolve(window.L); return }
+        const script = document.createElement('script')
+        script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
+        script.onload = () => resolve(window.L)
+        document.head.appendChild(script)
+      })
+    }
+
+    const validPins = pins.filter(p => p.lat && p.lng)
+    if (validPins.length === 0 || !mapRef.current) return
+
+    loadLeaflet().then(L => {
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.remove()
+        mapInstanceRef.current = null
+      }
+
+      const map = L.map(mapRef.current, { zoomControl: true, attributionControl: true })
+      mapInstanceRef.current = map
+
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; OpenStreetMap &copy; CARTO',
+        maxZoom: 19,
+      }).addTo(map)
+
+      const markers = []
+      for (const pin of validPins) {
+        const cat = getCat(pin.type)
+
+        const iconHtml = `<div style="
+          width: 32px; height: 32px;
+          background: ${cat.color};
+          border: 2px solid #fff;
+          border-radius: 50%;
+          display: flex; align-items: center; justify-content: center;
+          font-size: 14px; line-height: 1;
+          box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+        ">${cat.icon}</div>`
+
+        const icon = L.divIcon({
+          html: iconHtml,
+          className: '',
+          iconSize: [32, 32],
+          iconAnchor: [16, 16],
+          popupAnchor: [0, -18],
+        })
+
+        const marker = L.marker([pin.lat, pin.lng], { icon }).addTo(map)
+        marker.bindPopup(`
+          <div style="font-family:Inter,sans-serif;min-width:140px;">
+            <strong style="font-size:13px;">${cat.icon} ${pin.name}</strong>
+            ${pin.description ? `<br/><span style="font-size:11px;color:#666;">${pin.description}</span>` : ''}
+            <br/><a href="${pinMapsUrl(pin.name, city)}" target="_blank" style="font-size:11px;color:#4285f4;">Open in Google Maps ↗</a>
+          </div>
+        `)
+        markers.push(marker)
+      }
+
+      if (markers.length > 0) {
+        const group = L.featureGroup(markers)
+        map.fitBounds(group.getBounds().pad(0.15))
+      }
+    })
+
+    return () => {
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.remove()
+        mapInstanceRef.current = null
+      }
+    }
+  }, [pins])
+
+  const validCount = pins.filter(p => p.lat && p.lng).length
+  if (validCount === 0) return null
+
+  return (
+    <div ref={mapRef} className="rounded-xl overflow-hidden" style={{height: 320, border:'1px solid rgba(127,182,133,0.2)'}} />
+  )
+}
+
+// ── Map Tab Content ────────────────────────────────────────────────────────────
+function MapTab({ dest, itinerary }) {
+  const [pins, setPins] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [geocoding, setGeocoding] = useState(false)
+  const [activeFilter, setActiveFilter] = useState('all')
+
+  const city = dest?.CITY || ''
+
+  const handleDownloadCSV = () => {
+    track('map_export', { format: 'csv', destination: dest?.CITY })
+    const validPins = pins.filter(p => p.lat && p.lng)
+    const rows = [['Name', 'Category', 'Description', 'Latitude', 'Longitude']]
+    for (const pin of validPins) {
+      const cat = getCat(pin.type)
+      rows.push([
+        pin.name,
+        cat.label,
+        (pin.description || '').replace(/,/g, ';'),
+        pin.lat,
+        pin.lng,
+      ])
+    }
+    const csv = rows.map(r => r.map(c => `"${c}"`).join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${city.toLowerCase().replace(/\s+/g, '-')}-itinerary.csv`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
+  useEffect(() => {
+    if (!itinerary || !dest?.CITY || pins) return
+    setLoading(true)
+    api.mapPins({ itinerary, dest_city: dest.CITY })
+      .then(async (d) => {
+        const rawPins = d.locations || []
+        setLoading(false)
+        setGeocoding(true)
+        const geocoded = await geocodeAllPins(rawPins, dest.CITY)
+        setPins(geocoded)
+        setGeocoding(false)
+      })
+      .catch(() => { setPins([]); setLoading(false) })
+  }, [itinerary, dest?.CITY])
+
+  if (loading) {
+    return (
+      <div className="py-8">
+        <SherpaSpinner messages={['Mapping your itinerary...', 'Finding all the spots...', 'Pinning locations...']} />
+      </div>
+    )
+  }
+
+  if (!pins || pins.length === 0) {
+    return (
+      <div className="text-center py-8">
+        <p className="text-sm" style={{color:'#a0a098'}}>No map pins found for this itinerary.</p>
+      </div>
+    )
+  }
+
+  const grouped = groupByCategory(pins)
+  const categories = Object.keys(grouped).sort()
+  const filteredPins = activeFilter === 'all' ? pins : pins.filter(p => (p.type || 'Other') === activeFilter)
+  const geocodedCount = pins.filter(p => p.lat && p.lng).length
+
+  return (
+    <div className="space-y-4">
+
+      {geocoding && (
+        <div className="rounded-xl p-4 text-center" style={{background:'#1a2020', border:'1px solid rgba(127,182,133,0.15)'}}>
+          <SherpaSpinner messages={['Placing pins on the map...', 'Finding coordinates...', 'Nearly there...']} />
+        </div>
+      )}
+
+      {!geocoding && geocodedCount > 0 && (
+        <LeafletMap pins={filteredPins} city={city} />
+      )}
+
+      {!geocoding && geocodedCount > 0 && (
+        <div className="rounded-xl p-4 space-y-4" style={{background:'#1a2020', border:'1px solid rgba(127,182,133,0.2)'}}>
+          <p className="text-xs font-bold uppercase tracking-widest" style={{color:'#7fb685'}}>
+            Export to Google Maps
+          </p>
+
+          <div className="flex gap-2">
+            <button
+              onClick={() => downloadKML(pins, city, dest?.EMOJI || '📍', dest?.CITY)}
+              className="flex-1 flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-medium transition-all"
+              style={{background:'#34a853', color:'#fff'}}
+              onMouseEnter={e => e.currentTarget.style.background='#2d9249'}
+              onMouseLeave={e => e.currentTarget.style.background='#34a853'}>
+              <span>📥</span>
+              KML file
+            </button>
+
+            <button
+              onClick={handleDownloadCSV}
+              className="flex-1 flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-medium transition-all"
+              style={{background:'#4285f4', color:'#fff'}}
+              onMouseEnter={e => e.currentTarget.style.background='#3367d6'}
+              onMouseLeave={e => e.currentTarget.style.background='#4285f4'}>
+              <span>📊</span>
+              CSV file
+            </button>
+          </div>
+
+          <div className="space-y-3">
+            <div className="rounded-lg p-3" style={{background:'rgba(52,168,83,0.08)', border:'1px solid rgba(52,168,83,0.15)'}}>
+              <p className="text-xs font-semibold mb-1.5" style={{color:'#34a853'}}>📱 Mobile (KML)</p>
+              <div className="space-y-1">
+                <p className="text-xs" style={{color:'#a0a098'}}>1. Download the KML file</p>
+                <p className="text-xs" style={{color:'#a0a098'}}>2. Open it and select Google Maps</p>
+                <p className="text-xs" style={{color:'#a0a098'}}>3. All pins appear on your map instantly</p>
+              </div>
+            </div>
+
+            <div className="rounded-lg p-3" style={{background:'rgba(66,133,244,0.08)', border:'1px solid rgba(66,133,244,0.15)'}}>
+              <p className="text-xs font-semibold mb-1.5" style={{color:'#4285f4'}}>💻 Desktop (CSV)</p>
+              <div className="space-y-1">
+                <p className="text-xs" style={{color:'#a0a098'}}>1. Download the CSV file</p>
+                <p className="text-xs" style={{color:'#a0a098'}}>2. Go to <a href="https://www.google.com/maps/d/" target="_blank" rel="noopener noreferrer" style={{color:'#4285f4', textDecoration:'underline'}}>Google My Maps</a> and create a new map</p>
+                <p className="text-xs" style={{color:'#a0a098'}}>3. Click Import and upload the CSV</p>
+                <p className="text-xs" style={{color:'#a0a098'}}>4. Select Latitude and Longitude as position columns</p>
+                <p className="text-xs" style={{color:'#a0a098'}}>5. Select Name as the title column</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="rounded-xl p-3" style={{background:'#1a2020', border:'1px solid rgba(127,182,133,0.15)'}}>
+        <p className="text-xs uppercase tracking-widest mb-2" style={{color:'#7a7870'}}>Filter by category</p>
+        <div className="flex flex-wrap gap-1.5">
+          <button
+            onClick={() => setActiveFilter('all')}
+            className="text-xs px-2.5 py-1 rounded-full transition-all"
+            style={{
+              background: activeFilter === 'all' ? 'rgba(127,182,133,0.2)' : 'transparent',
+              color: activeFilter === 'all' ? '#7fb685' : '#7a7870',
+              border: `1px solid ${activeFilter === 'all' ? 'rgba(127,182,133,0.4)' : 'rgba(255,255,255,0.08)'}`,
+            }}>
+            All ({pins.length})
+          </button>
+          {categories.map(cat => {
+            const cfg = getCat(cat)
+            const count = grouped[cat].length
+            return (
+              <button key={cat}
+                onClick={() => setActiveFilter(activeFilter === cat ? 'all' : cat)}
+                className="text-xs px-2.5 py-1 rounded-full transition-all"
+                style={{
+                  background: activeFilter === cat ? cfg.bg : 'transparent',
+                  color: activeFilter === cat ? cfg.color : '#7a7870',
+                  border: `1px solid ${activeFilter === cat ? cfg.border : 'rgba(255,255,255,0.08)'}`,
+                }}>
+                {cfg.icon} {cfg.label} ({count})
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      <p className="text-xs" style={{color:'#7a7870'}}>
+        Showing {filteredPins.length} of {pins.length} locations
+        {geocodedCount < pins.length && ` · ${geocodedCount} mapped`}
+      </p>
+
+      <div className="space-y-2">
+        {activeFilter === 'all' ? (
+          categories.map(cat => {
+            const cfg = getCat(cat)
+            return (
+              <div key={cat}>
+                <div className="flex items-center gap-2 mb-2 mt-4 first:mt-0">
+                  <span>{cfg.icon}</span>
+                  <p className="text-xs font-bold uppercase tracking-widest" style={{color: cfg.color}}>
+                    {cfg.label}
+                  </p>
+                  <div className="flex-1 h-px" style={{background: cfg.border}} />
+                </div>
+                <div className="space-y-1.5">
+                  {grouped[cat].map((pin, i) => (
+                    <MapPinCard key={i} pin={pin} city={city} />
+                  ))}
+                </div>
+              </div>
+            )
+          })
+        ) : (
+          <div className="space-y-1.5">
+            {filteredPins.map((pin, i) => (
+              <MapPinCard key={i} pin={pin} city={city} />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── Main Modal ─────────────────────────────────────────────────────────────────
 export default function ItineraryModal({
   itinerary, dest, destData, prefs, flightDetails, selectedHotel,
   feedback, setFeedback, onTweak, tweaking,
@@ -367,7 +797,6 @@ export default function ItineraryModal({
 
   useEffect(() => {
     if (!dest?.CITY) return
-    // Build 4 search queries: city + each of the first 3 highlights
     const queries = [
       dest.CITY,
       ...(destData?.highlights?.slice(0, 3) || []).map(h => `${dest.CITY} ${h}`)
@@ -381,10 +810,11 @@ export default function ItineraryModal({
   const scrollTop = () => scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
 
   const tabs = [
-    { id: 'overview', label: '🗺️ Overview'     },
-    { id: 'days',     label: '📅 Day by Day'   },
-    { id: 'booking',  label: '🛒 Book' },
-    { id: 'local',    label: '💡 Local Tips'   },
+    { id: 'overview', label: '🗺️ Overview'   },
+    { id: 'days',     label: '📅 Day by Day'  },
+    { id: 'map',      label: '📍 Map'         },
+    { id: 'booking',  label: '🛒 Book'        },
+    { id: 'local',    label: '💡 Local Tips'  },
   ]
 
   const fmtDate = (iso) => {
@@ -393,20 +823,14 @@ export default function ItineraryModal({
     catch { return iso }
   }
 
-  // Add Getting There blocks into Day 1
   const daysWithTransfer = days.map((day, i) => {
     let blocks = [...day.blocks]
-
-    // Prepend Getting There to Day 1
     if (i === 0 && sections.getting_there.length > 0) {
       blocks = [{ isActivity: true, title: 'Getting There', icon: '✈️', details: sections.getting_there }, ...blocks]
     }
-
-    // Append Getting Home to last day
     if (i === days.length - 1 && sections.getting_home.length > 0) {
       blocks = [...blocks, { isActivity: true, title: 'Getting Home', icon: '🏠', details: sections.getting_home }]
     }
-
     return { ...day, blocks }
   })
 
@@ -452,33 +876,22 @@ export default function ItineraryModal({
           {/* ── OVERVIEW ── */}
           {activeTab === 'overview' && (
             <div className="space-y-3">
-
-              {/* Photo strip */}
               {photos.length > 0 && (
                 <div className="flex gap-2 -mx-1">
                   {photos.map((p, i) => (
                     <div key={i} className="flex-1 min-w-0 rounded-xl overflow-hidden"
                          style={{height: 120, flexBasis: `${100/photos.length}%`}}>
-                      <img src={p.thumb || p.url} alt=""
-                           className="w-full h-full object-cover"
-                           style={{filter:'brightness(0.9)'}} />
+                      <img src={p.thumb || p.url} alt="" className="w-full h-full object-cover" style={{filter:'brightness(0.9)'}} />
                     </div>
                   ))}
                 </div>
               )}
 
-              {/* Inspire card content */}
               {destData && (
                 <div className="rounded-xl p-4 space-y-3" style={{background:'rgba(127,182,133,0.06)', border:'1px solid rgba(127,182,133,0.25)'}}>
-                  {destData.TAGLINE && (
-                    <p className="font-serif text-base italic" style={{color:'#f0ede8'}}>"{destData.TAGLINE}"</p>
-                  )}
-                  {destData.BUDGET_NOTE && (
-                    <p className="text-sm leading-relaxed" style={{color:'#c8c4bc'}}>💰 {destData.BUDGET_NOTE}</p>
-                  )}
-                  {destData.WEATHER && (
-                    <p className="text-sm leading-relaxed" style={{color:'#c8c4bc'}}>🌤️ {destData.WEATHER}</p>
-                  )}
+                  {destData.TAGLINE && <p className="font-serif text-base italic" style={{color:'#f0ede8'}}>"{destData.TAGLINE}"</p>}
+                  {destData.BUDGET_NOTE && <p className="text-sm leading-relaxed" style={{color:'#c8c4bc'}}>💰 {destData.BUDGET_NOTE}</p>}
+                  {destData.WEATHER && <p className="text-sm leading-relaxed" style={{color:'#c8c4bc'}}>🌤️ {destData.WEATHER}</p>}
                   {destData.highlights?.length > 0 && (
                     <div className="flex flex-wrap gap-1.5 pt-1">
                       {destData.highlights.map((h, i) => (
@@ -489,13 +902,10 @@ export default function ItineraryModal({
                       ))}
                     </div>
                   )}
-                  {destData.DISH && (
-                    <p className="text-xs" style={{color:'#7a7870'}}>🍴 Must try: <span style={{color:'#a0a098'}}>{destData.DISH}</span></p>
-                  )}
+                  {destData.DISH && <p className="text-xs" style={{color:'#7a7870'}}>🍴 Must try: <span style={{color:'#a0a098'}}>{destData.DISH}</span></p>}
                 </div>
               )}
 
-              {/* Trip at a glance */}
               <div className="rounded-xl p-4" style={{background:'#1a2020', border:'1px solid rgba(127,182,133,0.25)'}}>
                 <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{color:'#7fb685'}}>Trip at a Glance</p>
                 <div className="space-y-2">
@@ -535,8 +945,6 @@ export default function ItineraryModal({
                   )}
                 </div>
               </div>
-
-
             </div>
           )}
 
@@ -590,11 +998,14 @@ export default function ItineraryModal({
             </div>
           )}
 
+          {/* ── MAP ── */}
+          {activeTab === 'map' && (
+            <MapTab dest={dest} itinerary={itinerary} />
+          )}
+
           {/* ── BOOK ── */}
           {activeTab === 'booking' && (
             <div className="space-y-4">
-
-              {/* Flights */}
               {skyscannerUrl && (
                 <div className="rounded-xl p-4" style={{background:'#1a2020', border:'1px solid rgba(127,182,133,0.2)'}}>
                   <p className="text-xs font-bold uppercase tracking-widest mb-1" style={{color:'#7fb685'}}>✈️ Flights</p>
@@ -605,13 +1016,13 @@ export default function ItineraryModal({
                   </p>
                   <a href={skyscannerUrl} target="_blank" rel="noopener noreferrer"
                      className="block w-full text-center py-2.5 rounded-lg text-sm font-medium"
-                     style={{background:'#0077CC', color:'#fff'}}>
+                     style={{background:'#0077CC', color:'#fff'}}
+                     onClick={() => track('affiliate_click', { partner: 'skyscanner', destination: dest?.CITY })}>
                     Search on Skyscanner →
                   </a>
                 </div>
               )}
 
-              {/* Hotels */}
               {bookingUrl && (
                 <div className="rounded-xl p-4" style={{background:'#1a2020', border:'1px solid rgba(127,182,133,0.2)'}}>
                   <p className="text-xs font-bold uppercase tracking-widest mb-1" style={{color:'#7fb685'}}>🏨 Hotels</p>
@@ -620,30 +1031,30 @@ export default function ItineraryModal({
                   </p>
                   <a href={bookingUrl} target="_blank" rel="noopener noreferrer"
                      className="block w-full text-center py-2.5 rounded-lg text-sm font-medium"
-                     style={{background:'#003580', color:'#fff'}}>
+                     style={{background:'#003580', color:'#fff'}}
+                     onClick={() => track('affiliate_click', { partner: 'booking', destination: dest?.CITY })}>
                     Explore on Booking.com →
                   </a>
                 </div>
               )}
 
-              {/* Car hire */}
               {carHireUrl && (
                 <div className="rounded-xl p-4" style={{background:'#1a2020', border:'1px solid rgba(127,182,133,0.2)'}}>
                   <p className="text-xs font-bold uppercase tracking-widest mb-1" style={{color:'#7fb685'}}>🚗 Car Hire</p>
                   <p className="text-xs mb-3" style={{color:'#7a7870'}}>Compare prices from all major providers</p>
                   <a href={carHireUrl} target="_blank" rel="noopener noreferrer"
                      className="block w-full text-center py-2.5 rounded-lg text-sm font-medium"
-                     style={{background:'#e8750a', color:'#fff'}}>
+                     style={{background:'#e8750a', color:'#fff'}}
+                     onClick={() => track('affiliate_click', { partner: 'rentalcars', destination: dest?.CITY })}>
                     Compare on Rentalcars →
                   </a>
                 </div>
               )}
 
-              {/* Activities & Direct Bookings */}
               {activities === null ? (
                 <div className="rounded-xl p-5 text-center" style={{background:'#1a2020', border:'1px solid rgba(127,182,133,0.2)'}}>
                   {activitiesLoading ? (
-                    <SherpaSpinner messages={['Finding tours to book…','Checking restaurant reservations…','Spotting must-see museums…','Almost there…']} />
+                    <SherpaSpinner messages={['Finding tours to book...','Checking restaurant reservations...','Spotting must-see museums...','Almost there...']} />
                   ) : (
                     <>
                       <p className="text-sm mb-3" style={{color:'#a0a098'}}>Find out what to book in advance for this trip.</p>
@@ -653,8 +1064,6 @@ export default function ItineraryModal({
                 </div>
               ) : (
                 <div className="space-y-4">
-
-                  {/* GYG — tours and experiences */}
                   {activities.gyg?.length > 0 && (
                     <div className="rounded-xl overflow-hidden" style={{border:'1px solid rgba(127,182,133,0.2)'}}>
                       <div className="px-4 py-2.5 flex items-center gap-2" style={{background:'rgba(127,182,133,0.1)'}}>
@@ -671,7 +1080,8 @@ export default function ItineraryModal({
                             </div>
                             <a href={a.gyg_url} target="_blank" rel="noopener noreferrer"
                                className="shrink-0 text-xs px-3 py-1.5 rounded-lg whitespace-nowrap"
-                               style={{background:'rgba(127,182,133,0.15)', color:'#7fb685', border:'1px solid rgba(127,182,133,0.3)'}}>
+                               style={{background:'rgba(127,182,133,0.15)', color:'#7fb685', border:'1px solid rgba(127,182,133,0.3)'}}
+                               onClick={() => track('affiliate_click', { partner: 'getyourguide', destination: dest?.CITY })}>
                               Book →
                             </a>
                           </div>
@@ -680,7 +1090,6 @@ export default function ItineraryModal({
                     </div>
                   )}
 
-                  {/* Direct bookings — restaurants and bars */}
                   {activities.direct?.length > 0 && (
                     <div className="rounded-xl overflow-hidden" style={{border:'1px solid rgba(127,182,133,0.15)'}}>
                       <div className="px-4 py-2.5 flex items-center gap-2" style={{background:'rgba(255,255,255,0.04)'}}>
@@ -691,9 +1100,7 @@ export default function ItineraryModal({
                       <div className="divide-y" style={{background:'#1a2020', borderColor:'rgba(255,255,255,0.06)'}}>
                         {activities.direct.map((a, i) => {
                           const typeIcon = {Restaurant:'🍽️', Museum:'🏛️', Attraction:'⭐', Bar:'🍸', Cafe:'☕'}[a.type] || '📍'
-                          return (
-                            <VenueCard key={i} venue={a} typeIcon={typeIcon} destCity={dest?.CITY} />
-                          )
+                          return <VenueCard key={i} venue={a} typeIcon={typeIcon} destCity={dest?.CITY} />
                         })}
                       </div>
                     </div>
@@ -712,18 +1119,16 @@ export default function ItineraryModal({
             <div className="space-y-3">
               <p className="text-xs uppercase tracking-widest mb-3" style={{color:'#7a7870'}}>Local knowledge for {dest?.CITY}</p>
 
-              {/* Top 3 AI tips — no numbers */}
               {sections.tips.slice(0, 3).map((tip, i) => (
                 <div key={i} className="rounded-xl p-4 flex items-start gap-3"
                      style={{background:'#1a2020', border:'1px solid rgba(127,182,133,0.15)'}}>
-                  <span className="shrink-0" style={{color:'#7fb685'}}>—</span>
+                  <span className="shrink-0" style={{color:'#7fb685'}}>--</span>
                   <p className="text-sm leading-relaxed" style={{color:'#c8c4bc'}}>
                     {tip.replace(/^\d+[\.\)]\s*/, '')}
                   </p>
                 </div>
               ))}
 
-              {/* Language tips */}
               <div className="rounded-xl p-4" style={{background:'#1a2020', border:'1px solid rgba(255,255,255,0.08)'}}>
                 <div className="flex items-center gap-2 mb-3">
                   <span>🗣️</span>
@@ -755,16 +1160,16 @@ export default function ItineraryModal({
            style={{background:'#111614', borderColor:'rgba(255,255,255,0.08)'}}>
         <div className="flex gap-2">
           <input className="input flex-1 text-sm"
-            placeholder="Request changes… e.g. more food focus, swap day 2"
+            placeholder="Request changes... e.g. more food focus, swap day 2"
             value={feedback} onChange={e => setFeedback(e.target.value)}
             onKeyDown={e => e.key==='Enter' && onTweak()} />
           <button className="btn-primary px-4" onClick={onTweak} disabled={tweaking||!feedback.trim()}>
-            {tweaking ? '…' : '↺'}
+            {tweaking ? '...' : '↺'}
           </button>
         </div>
         {user ? (
           <button className="btn-primary w-full text-sm" onClick={onSave} disabled={saving}>
-            {saving ? '…' : saved ? '✓ Saved!' : '💾 Save this trip'}
+            {saving ? '...' : saved ? '✓ Saved!' : '💾 Save this trip'}
           </button>
         ) : (
           <button disabled className="w-full py-2 rounded-lg text-sm"
