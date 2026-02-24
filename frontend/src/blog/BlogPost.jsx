@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { getPost } from './registry'
+import { getPost } from './Registry'
 
 export default function BlogPost() {
   const { slug }            = useParams()

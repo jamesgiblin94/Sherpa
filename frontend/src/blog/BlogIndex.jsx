@@ -1,7 +1,7 @@
 import '/src/index.css'
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { posts, getAllTags } from './registry'
+import { posts, getAllTags } from './Registry'
 
 export default function BlogIndex() {
   const [activeTag, setActiveTag] = useState(null)
