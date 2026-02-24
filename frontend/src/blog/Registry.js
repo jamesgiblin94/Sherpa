@@ -21,19 +21,7 @@ export const posts = [
   tags:        ['Greece', 'City Break', 'Culture', 'Food'],
   readTime:    7,
 },
-    {
-    slug:        'lisbon-4-days',
-    title:       '4 Days in Lisbon — The Perfect Long Weekend',
-    description: "Everything you need for a long weekend in one of Europe's most underrated cities. Where to stay, eat, and what to actually do with 4 days in Lisbon.",
-    date:        '2026-02-22',
-    author:      'James',
-    destination: 'Lisbon',
-    country:     'Portugal',
-    emoji:       '🇵🇹',
-    coverImage:  '/blog/lisbon-4-days/cover.jpg',
-    tags:        ['Portugal', 'City Break', 'Weekend', 'Food', 'Budget'],
-    readTime:    7,
-  },
+
 
   // ── ADD NEW POSTS HERE ──────────────────────────────────────
   // {
