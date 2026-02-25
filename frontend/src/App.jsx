@@ -53,10 +53,13 @@ export default function App() {
   const [carHire, setCarHire]             = useState({ confirmed: null, data: null })
   const [selectedHotel, setSelectedHotel] = useState('')
 
-  const loadProfile = async (u) => {
+  const loadProfile = async (u, sendWelcome = false) => {
     const profile = await getProfile(u.id)
     if (!profile) {
-      api.welcomeEmail({ email: u.email, first_name: '' }).catch(() => {})
+      // Only send welcome email on a fresh SIGNED_IN event AND after email is confirmed
+      if (sendWelcome && u.email_confirmed_at) {
+        api.welcomeEmail({ email: u.email, first_name: '' }).catch(() => {})
+      }
       setShowProfile(true)
     } else {
       setUserProfile(profile)
@@ -64,15 +67,19 @@ export default function App() {
   }
 
   useEffect(() => {
+    // Initial page load — never send welcome email here, avoids duplicate on refresh
     supabase.auth.getUser().then(({ data: { user } }) => {
       setUser(user)
-      if (user) loadProfile(user)
+      if (user) loadProfile(user, false)
     })
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       const u = session?.user || null
       setUser(u)
-      if (u) loadProfile(u)
+      // Only attempt welcome email on a genuine fresh sign-in, not page refresh
+      if (u) loadProfile(u, _event === 'SIGNED_IN')
     })
+
     return () => subscription.unsubscribe()
   }, [])
 
