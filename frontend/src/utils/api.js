@@ -66,4 +66,5 @@ export const api = {
   chat:            (body)  => post('/chat', body),
   nearby:          (body)  => post('/nearby', body),
   history:         (body)  => post('/history', body),
+  welcomeEmail:    (body) => post('/welcome-email', body),
 }

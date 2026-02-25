@@ -789,6 +789,7 @@ export default function ItineraryModal({
   activities, fetchActivities, activitiesLoading,
   skyscannerUrl, bookingUrl, carHireUrl,
   onClose,
+  onRequestFeedback,
 }) {
   const [activeTab, setActiveTab] = useState('overview')
   const [photos, setPhotos] = useState([])
@@ -987,7 +988,19 @@ export default function ItineraryModal({
                     ← Previous day
                   </button>
                   <button disabled={activeDay===daysWithTransfer.length-1}
-                    onClick={() => { setActiveDay(d=>Math.min(daysWithTransfer.length-1,d+1)); scrollTop() }}
+                    onClick={() => {
+                      const nextDay = Math.min(daysWithTransfer.length-1, activeDay+1)
+                      setActiveDay(nextDay)
+                      scrollTop()
+                      // Prompt feedback when reaching the last day for the first time
+                      if (nextDay === daysWithTransfer.length-1 && onRequestFeedback) {
+                        const hasPrompted = localStorage.getItem('sherpa_feedback_prompted')
+                        if (!hasPrompted) {
+                          localStorage.setItem('sherpa_feedback_prompted', '1')
+                          setTimeout(() => onRequestFeedback(), 2000)
+                        }
+                      }
+                    }}
                     className="flex-1 py-2 rounded-lg text-sm"
                     style={{background:'#1a2020', color: activeDay===daysWithTransfer.length-1?'#3a4a5a':'#c8c4bc',
                             border:'1px solid rgba(255,255,255,0.08)'}}>

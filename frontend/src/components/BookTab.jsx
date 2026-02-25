@@ -49,7 +49,6 @@ function FlightSection({ prefs, dest, flightDetails, setFlightDetails }) {
   const [ret,       setRet]       = useState(flightDetails.returnDate   ? new Date(flightDetails.returnDate)   : null)
   const [datesOpen, setDatesOpen] = useState(!flightDetails.outboundDate)
 
-  // Sync local date state when flightDetails changes externally (e.g. from Inspire dates)
   useEffect(() => {
     if (flightDetails.outboundDate) { setDepart(new Date(flightDetails.outboundDate)); setDatesOpen(false) }
     if (flightDetails.returnDate)   setRet(new Date(flightDetails.returnDate))
@@ -256,7 +255,6 @@ function CarHireSection({ prefs, dest, flightDetails, carHire, setCarHire }) {
   const d = carHire.data || {}
   const score = d.rating || 3
 
-  // Build Rentalcars URL from flight dates
   const rcUrl = (() => {
     const dep = flightDetails?.outboundDate
     const ret = flightDetails?.returnDate
@@ -365,7 +363,6 @@ function AccomSection({ prefs, dest, carHire, selectedHotel, setSelectedHotel, f
     const params = new URLSearchParams({
       ss:           dest.CITY,
       lang:         'en-gb',
-      // aid: '304142', // add when Booking.com affiliate approved
       group_adults: Number(prefs.numAdults) || 2,
       no_rooms:     1,
     })
@@ -488,7 +485,7 @@ function AccomSection({ prefs, dest, carHire, selectedHotel, setSelectedHotel, f
 
 // ── Itinerary section ────────────────────────────────────────────────────────
 
-function ItinerarySection({ prefs, dest, flightDetails, carHire, selectedHotel, itinerary, setItinerary, user, userProfile, onSaveTrip, externalShowModal, setExternalShowModal, onRequireAuth }) {
+function ItinerarySection({ prefs, dest, flightDetails, carHire, selectedHotel, itinerary, setItinerary, user, userProfile, onSaveTrip, externalShowModal, setExternalShowModal, onRequireAuth, onRequestFeedback }) {
   const [loading,    setLoading]    = useState(false)
   const [feedback,   setFeedback]   = useState('')
   const [tweaking,   setTweaking]   = useState(false)
@@ -502,14 +499,12 @@ function ItinerarySection({ prefs, dest, flightDetails, carHire, selectedHotel, 
 
   const { remaining: buildRemaining, limitReached: buildLimitReached, increment: incrementBuild } = useUsageLimit('itinerary')
 
-  // Open modal when a trip is loaded externally (from MyTrips)
   const isModalOpen = showModal || !!externalShowModal
   const closeModal  = () => { setShowModal(false); if (setExternalShowModal) setExternalShowModal(false) }
 
   const buildItinerary = async () => {
     if (!dest) return
 
-    // Check usage limit for non-signed-in users
     if (!user && buildLimitReached) {
       onRequireAuth()
       return
@@ -546,7 +541,6 @@ function ItinerarySection({ prefs, dest, flightDetails, carHire, selectedHotel, 
       setLoading(false)
       setShowModal(true)
       track('itinerary_build', { destination: dest.CITY, country: dest.COUNTRY })
-      // Count this usage for non-signed-in users
       if (!user) incrementBuild()
     }
   }
@@ -720,6 +714,7 @@ function ItinerarySection({ prefs, dest, flightDetails, carHire, selectedHotel, 
           activities={activities}
           fetchActivities={fetchActivities}
           activitiesLoading={activitiesLoading}
+          onRequestFeedback={onRequestFeedback}
           skyscannerUrl={flightDetails.confirmed && flightDetails.selectedAirport
             ? (() => {
                 const ap = flightDetails.selectedAirport
@@ -764,7 +759,6 @@ function ItinerarySection({ prefs, dest, flightDetails, carHire, selectedHotel, 
       {/* Keep old action buttons outside modal for map */}
       {itinerary && !loading && (
         <>
-          {/* Map pins list (simple, no iframe) */}
           {showMap && mapPins !== null && (
             <div className="card">
               <div className="flex items-center justify-between mb-3">
@@ -813,12 +807,12 @@ export default function BookTab({
   user, userProfile, onSaveTrip,
   externalShowModal, setExternalShowModal,
   onRequireAuth,
+  onRequestFeedback,
 }) {
   const [destInput, setDestInput] = useState(
     chosenDest ? `${chosenDest.CITY}, ${chosenDest.COUNTRY}` : ''
   )
 
-  // Allow manual destination entry
   const handleManualDest = () => {
     const parts = destInput.split(',')
     setChosenDest({ CITY: parts[0]?.trim(), COUNTRY: parts[1]?.trim() || '', EMOJI: '🌍' })
@@ -921,6 +915,7 @@ export default function BookTab({
           externalShowModal={externalShowModal}
           setExternalShowModal={setExternalShowModal}
           onRequireAuth={onRequireAuth}
+          onRequestFeedback={onRequestFeedback}
         />
       </Section>
     </div>

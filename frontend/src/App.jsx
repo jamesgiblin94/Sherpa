@@ -5,6 +5,7 @@ import InspireTab from './components/InspireTab'
 import BookTab from './components/BookTab'
 import SupportTab from './components/SupportTab'
 import AuthModal from './components/AuthModal'
+import FeedbackModal from './components/FeedbackModal'
 import MyTrips from './components/MyTrips'
 import ProfileSetup from './components/ProfileSetup'
 import AccountMenu from './components/AccountMenu'
@@ -19,6 +20,7 @@ export default function App() {
   const [tab, setTab] = useState('inspire')
   const [user, setUser] = useState(null)
   const [showAuth, setShowAuth] = useState(false)
+  const [showFeedback, setShowFeedback] = useState(false)
   const [showItineraryModal,  setShowItineraryModal]  = useState(false)
   const [modalActivities,     setModalActivities]     = useState(null)
   const [modalActivitiesLoad, setModalActivitiesLoad] = useState(false)
@@ -52,13 +54,15 @@ export default function App() {
   const [selectedHotel, setSelectedHotel] = useState('')
 
   const loadProfile = async (u) => {
-    const profile = await getProfile(u.id)
-    if (!profile) {
-      setShowProfile(true)
-    } else {
-      setUserProfile(profile)
-    }
+  const profile = await getProfile(u.id)
+  if (!profile) {
+    // First ever login after email confirmation — send welcome email silently
+    api.welcomeEmail({ email: u.email, first_name: '' }).catch(() => {})
+    setShowProfile(true)
+  } else {
+    setUserProfile(profile)
   }
+}
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -170,6 +174,14 @@ export default function App() {
                 onMouseLeave={e => e.target.style.color='#7a7870'}>
                 ✍️ Blog
               </a>
+              <button
+                onClick={() => setShowFeedback(true)}
+                className="px-3 py-1.5 rounded-lg text-sm font-medium transition-all"
+                style={{color:'#7a7870', border:'1px solid transparent'}}
+                onMouseEnter={e => e.target.style.color='#a8c9ad'}
+                onMouseLeave={e => e.target.style.color='#7a7870'}>
+                💬 Feedback
+              </button>
             </nav>
             {user ? (
               <AccountMenu
@@ -187,6 +199,10 @@ export default function App() {
 
       {showAuth && (
         <AuthModal onClose={() => setShowAuth(false)} onSuccess={() => setShowAuth(false)} />
+      )}
+
+      {showFeedback && (
+        <FeedbackModal onClose={() => setShowFeedback(false)} user={user} />
       )}
 
       {showProfile && user && (
@@ -213,6 +229,7 @@ export default function App() {
             onBook={() => switchTab('book')}
             user={user}
             onRequireAuth={() => setShowAuth(true)}
+            onRequestFeedback={() => setShowFeedback(true)}
           />
         )}
         {tab === 'book' && (

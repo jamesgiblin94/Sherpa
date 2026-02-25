@@ -3,6 +3,7 @@ Sherpa Travel Planner — FastAPI Backend
 Replaces the Streamlit app.py logic with proper REST + streaming API endpoints.
 """
 
+from email_service import send_welcome_email
 import os
 from dotenv import load_dotenv
 load_dotenv()
@@ -177,6 +178,10 @@ class LocalGuideRequest(BaseModel):
 
 class AirportsRequest(BaseModel):
     dest_city: str
+
+class WelcomeEmailRequest(BaseModel):
+    email: str
+    first_name: str = ""
 
 
 # ── UK Airport list ───────────────────────────────────────────────────────────
@@ -631,6 +636,15 @@ def map_pins(req: MapPinsRequest):
         return claude_json(prompt, max_tokens=800)
     except Exception as e:
         raise HTTPException(500, str(e))
+
+
+# ── Welcome email ─────────────────────────────────────────────────────────────
+@app.post("/api/welcome-email")
+def welcome_email(req: WelcomeEmailRequest):
+    if not req.email:
+        return {"sent": False}
+    sent = send_welcome_email(req.email, req.first_name)
+    return {"sent": sent}
 
 
 # ── Support chat ──────────────────────────────────────────────────────────────
