@@ -4,6 +4,7 @@ import { supabase } from './utils/supabase'
 import InspireTab from './components/InspireTab'
 import BookTab from './components/BookTab'
 import SupportTab from './components/SupportTab'
+import WelcomeModal from './components/WelcomeModal'
 import AuthModal from './components/AuthModal'
 import FeedbackModal from './components/FeedbackModal'
 import MyTrips from './components/MyTrips'
@@ -20,6 +21,7 @@ export default function App() {
   const [tab, setTab] = useState('inspire')
   const [user, setUser] = useState(null)
   const [showAuth, setShowAuth] = useState(false)
+  const [showWelcome, setShowWelcome] = useState(false)
   const [showFeedback, setShowFeedback] = useState(false)
   const [showItineraryModal,  setShowItineraryModal]  = useState(false)
   const [modalActivities,     setModalActivities]     = useState(null)
@@ -81,7 +83,7 @@ export default function App() {
         const hasVisited = localStorage.getItem('sherpa_visited')
         if (!hasVisited) {
           localStorage.setItem('sherpa_visited', '1')
-          setTimeout(() => setShowAuth(true), 1500)
+          setTimeout(() => setShowWelcome(true), 1500)
         }
       }
     })
@@ -228,6 +230,13 @@ export default function App() {
         <AuthModal onClose={() => setShowAuth(false)} onSuccess={() => setShowAuth(false)} />
       )}
 
+      {showWelcome && (
+        <WelcomeModal
+          onClose={() => setShowWelcome(false)}
+          onSuccess={() => setShowWelcome(false)}
+        />
+      )}
+
       {showFeedback && (
         <FeedbackModal onClose={() => setShowFeedback(false)} user={user} />
       )}
@@ -255,7 +264,7 @@ export default function App() {
             chosenDest={chosenDest} setChosenDest={handleChooseDest}
             onBook={() => switchTab('book')}
             user={user}
-            onRequireAuth={() => setShowAuth(true)}
+            onRequireAuth={() => setShowWelcome(true)}
             onRequestFeedback={() => setShowFeedback(true)}
           />
         )}
@@ -269,7 +278,7 @@ export default function App() {
             selectedHotel={selectedHotel} setSelectedHotel={setSelectedHotel}
             user={user} userProfile={userProfile} onSaveTrip={() => switchTab('trips')}
             externalShowModal={showItineraryModal} setExternalShowModal={setShowItineraryModal}
-            onRequireAuth={() => setShowAuth(true)}
+            onRequireAuth={() => setShowWelcome(true)}
           />
         )}
         {tab === 'trips' && (
