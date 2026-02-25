@@ -146,14 +146,29 @@ export default function App() {
       <Route path="/*" element={(
     <div className="min-h-screen">
       <header className="sticky top-0 z-50" style={{background:'rgba(17,22,20,0.92)', backdropFilter:'blur(12px)', borderBottom:'1px solid rgba(127,182,133,0.1)'}}>
-        {/* Sherpa Travel title — centred on its own row */}
-        <div className="max-w-4xl mx-auto px-4 pt-2.5 pb-1 text-center">
+
+        {/* Row 1: Sherpa Travel centred, Sign in / Account on the right */}
+        <div className="max-w-4xl mx-auto px-4 pt-2.5 pb-1 flex items-center justify-between">
+          <div style={{width:'80px'}} />
           <h1 className="font-serif text-xl tracking-wide" style={{color:'#a8c9ad'}}>
             Sherpa Travel
           </h1>
+          <div style={{width:'80px'}} className="flex justify-end">
+            {user ? (
+              <AccountMenu
+                user={user}
+                userProfile={userProfile}
+                onEditProfile={() => setShowEditProfile(true)}
+                onSignOut={handleSignOut}
+              />
+            ) : (
+              <button className="btn-secondary text-xs px-3 py-1.5" onClick={() => setShowAuth(true)}>Sign in</button>
+            )}
+          </div>
         </div>
-        {/* Nav row below */}
-        <div className="max-w-4xl mx-auto px-4 pb-2 flex items-center justify-between">
+
+        {/* Row 2: Nav tabs centred */}
+        <div className="max-w-4xl mx-auto px-4 pb-2 flex justify-center">
           <nav className="flex gap-1">
             {tabs.map(t => (
               <button
@@ -185,17 +200,8 @@ export default function App() {
               💬 Feedback
             </button>
           </nav>
-          {user ? (
-            <AccountMenu
-              user={user}
-              userProfile={userProfile}
-              onEditProfile={() => setShowEditProfile(true)}
-              onSignOut={handleSignOut}
-            />
-          ) : (
-            <button className="btn-secondary text-xs px-3 py-1.5" onClick={() => setShowAuth(true)}>Sign in</button>
-          )}
         </div>
+
       </header>
 
       {showAuth && (
