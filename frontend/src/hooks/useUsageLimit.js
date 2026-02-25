@@ -1,8 +1,8 @@
 import { useState } from 'react'
 
 const LIMITS = {
-  inspire: 3,
-  itinerary: 3,
+  inspire:   1,
+  itinerary: 1,
 }
 
 function getCount(key) {
