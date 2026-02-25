@@ -101,6 +101,8 @@ class InspireRequest(BaseModel):
     specific_return: Optional[str] = None
     dest_preference: Optional[str] = ""
     num_adults: int = 2
+    num_children: int = 0
+    children_ages: list[int] = []
 
 class ItineraryRequest(BaseModel):
     dest: str
@@ -116,6 +118,8 @@ class ItineraryRequest(BaseModel):
     specific_return: Optional[str] = None
     travel_month: str = "May"
     num_adults: int = 2
+    num_children: int = 0
+    children_ages: list[int] = []
     selected_hotel: str = ""
     car_hire_confirmed: Optional[str] = None
     arrival_time: str = "11:00"
@@ -270,6 +274,22 @@ def get_photo(query: str):
         return {"url": None}
 
 
+# ── Group label helper ────────────────────────────────────────────────────────
+def format_group(group_type: str, num_adults: int, num_children: int = 0, children_ages: list = None) -> str:
+    base = f"{group_type} ({num_adults} adult{'s' if num_adults != 1 else ''}"
+    if num_children > 0:
+        ages = children_ages or []
+        if ages:
+            age_str = ', '.join(
+                ('under 1' if a == 0 else str(a)) for a in ages
+            )
+            base += f", {num_children} child{'ren' if num_children != 1 else ''} aged {age_str}"
+        else:
+            base += f", {num_children} child{'ren' if num_children != 1 else ''}"
+    base += ")"
+    return base
+
+
 # ── Inspire ───────────────────────────────────────────────────────────────────
 @app.post("/api/inspire")
 def inspire(req: InspireRequest):
@@ -309,10 +329,11 @@ TRAVELLER PROFILE:
 - Departing from: {req.starting_point}
 - Dates: {date_text}
 - Budget: {req.budget}
-- Group: {req.group_type} ({req.num_adults} adults)
+- Group: {format_group(req.group_type, req.num_adults, req.num_children, req.children_ages)}
 - Trip type: {trip_type_text}
 - Transport: {transport_text}
 - Priorities: {req.priorities or "none specified"}
+{f"- IMPORTANT: Group includes {req.num_children} child{'ren' if req.num_children != 1 else ''} aged {', '.join(('under 1' if a == 0 else str(a)) for a in req.children_ages)}. Destinations must be family-friendly and all highlights, activities and budget notes should reflect this." if req.num_children > 0 else ""}
 
 For each destination return a card in EXACTLY this format (---DESTINATION--- before, ---END--- after):
 
@@ -431,13 +452,14 @@ TRAVELLER PROFILE:
 - Flying from: {req.origin_city}
 - Dates: {date_text}
 - Budget: {req.budget}
-- Group: {req.group_type} ({req.num_adults} adults)
+- Group: {format_group(req.group_type, req.num_adults, req.num_children, req.children_ages)}
 - Trip type: {trip_type_text}
 - Priorities: {req.priorities or "none specified"}
 - Staying at: {req.selected_hotel or "not yet decided"}
 - Arriving: {req.arrival_airport or req.dest_city} at {req.arrival_time}
 - Departing: {req.departure_time} on last day
 - Airport transfer: {req.transfer_label} from airport to city centre
+{f"- CHILDREN: Group includes {req.num_children} child{'ren' if req.num_children != 1 else ''} aged {', '.join(('under 1' if a == 0 else str(a)) for a in req.children_ages)}. All restaurant suggestions must be child-friendly. Activities must suit the youngest child's age. Flag anything with age/height restrictions. Keep pacing realistic for families with young children." if req.num_children > 0 else ""}
 {car_hire_note}
 
 FORMAT — use these exact ## headings:
