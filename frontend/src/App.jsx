@@ -74,7 +74,16 @@ export default function App() {
     // Initial page load — never send welcome email here, avoids duplicate on refresh
     supabase.auth.getUser().then(({ data: { user } }) => {
       setUser(user)
-      if (user) loadProfile(user, false)
+      if (user) {
+        loadProfile(user, false)
+      } else {
+        // Show sign-in prompt on first ever visit
+        const hasVisited = localStorage.getItem('sherpa_visited')
+        if (!hasVisited) {
+          localStorage.setItem('sherpa_visited', '1')
+          setTimeout(() => setShowAuth(true), 1500)
+        }
+      }
     })
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
