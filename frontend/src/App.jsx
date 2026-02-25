@@ -83,7 +83,6 @@ export default function App() {
     const p = newPrefs || prefs
     setItinerary('')
 
-    // If specific dates set, use them. If flexible month, approximate mid-month dates.
     let outbound = p.specificDepart || null
     let ret      = p.specificReturn  || null
     if (!outbound && p.travelMonth) {
@@ -132,9 +131,9 @@ export default function App() {
   }
 
   const tabs = [
-    { id: 'inspire', label: '✨  Inspire' },
-    { id: 'book',    label: '🗓️  Book'   },
-    { id: 'trips',   label: '🧭  Trips'  },
+    { id: 'inspire', label: '✨ Inspire' },
+    { id: 'book',    label: '🗓️ Book'   },
+    { id: 'trips',   label: '🧭 Trips'  },
   ]
 
   return (
@@ -144,18 +143,17 @@ export default function App() {
       <Route path="/*" element={(
     <div className="min-h-screen">
       <header className="sticky top-0 z-50" style={{background:'rgba(17,22,20,0.92)', backdropFilter:'blur(12px)', borderBottom:'1px solid rgba(127,182,133,0.1)'}}>
-        <div className="max-w-4xl mx-auto px-4 py-4 flex items-center justify-between">
-          <div>
-            <h1 className="font-serif text-2xl tracking-wide" style={{color:'#a8c9ad'}}>Sherpa</h1>
-            <p className="text-xs tracking-widest uppercase" style={{color:'#7a7870'}}>AI Travel Planner</p>
-          </div>
-          <div className="flex items-center gap-3">
+        <div className="max-w-4xl mx-auto px-4 py-2.5 flex items-center justify-between">
+          <h1 className="font-serif text-xl tracking-wide shrink-0" style={{color:'#a8c9ad'}}>
+            Sherpa Travel
+          </h1>
+          <div className="flex items-center gap-1">
             <nav className="flex gap-1">
               {tabs.map(t => (
                 <button
                   key={t.id}
                   onClick={() => switchTab(t.id)}
-                  className="px-4 py-2 rounded-lg text-sm font-medium transition-all"
+                  className="px-3 py-1.5 rounded-lg text-sm font-medium transition-all"
                   style={{
                     background: tab === t.id ? 'rgba(127,182,133,0.15)' : 'transparent',
                     color: tab === t.id ? '#a8c9ad' : '#7a7870',
@@ -166,7 +164,7 @@ export default function App() {
                 </button>
               ))}
               <a href="/blog"
-                className="px-4 py-2 rounded-lg text-sm font-medium transition-all"
+                className="px-3 py-1.5 rounded-lg text-sm font-medium transition-all"
                 style={{color:'#7a7870', border:'1px solid transparent'}}
                 onMouseEnter={e => e.target.style.color='#a8c9ad'}
                 onMouseLeave={e => e.target.style.color='#7a7870'}>
@@ -251,7 +249,6 @@ export default function App() {
         )}
       </main>
 
-      {/* Global itinerary modal — rendered at App level so it works from any tab */}
       {showItineraryModal && itinerary && (
         <ItineraryModal
           itinerary={itinerary}
