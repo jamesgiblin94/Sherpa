@@ -1,6 +1,5 @@
 """
 Sherpa Travel Planner — FastAPI Backend
-Replaces the Streamlit app.py logic with proper REST + streaming API endpoints.
 """
 
 from email_service import send_welcome_email
@@ -10,7 +9,6 @@ load_dotenv()
 import requests, json, re
 from datetime import date, timedelta
 from typing import Optional
-from contextlib import asynccontextmanager
 
 import anthropic
 from fastapi import FastAPI, HTTPException
@@ -24,6 +22,7 @@ SKYSCANNER_AFFILIATE_ID = os.getenv("SKYSCANNER_AFFILIATE_ID", "")
 BOOKING_AFFILIATE_ID    = os.getenv("BOOKING_AFFILIATE_ID", "")
 GYG_PARTNER_ID          = os.getenv("GYG_PARTNER_ID", "")
 RENTALCARS_AFFILIATE_ID = os.getenv("RENTALCARS_AFFILIATE_ID", "")
+GOOGLE_MAPS_API_KEY     = os.getenv("GOOGLE_MAPS_API_KEY", "")
 
 claude = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 UNSPLASH_KEY = "2L-hCJytn58q2JavZAt1tSO3FL6amLDpSGpWD8k_KFg"
@@ -33,14 +32,18 @@ app = FastAPI(title="Sherpa API", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000", "https://sherpaai.uk"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "https://sherpatravel.uk",
+        "https://www.sherpatravel.uk",
+    ],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def skyscanner_url(origin_sky: str, dest_sky: str, depart: str, ret: str, adults: int) -> str:
-    """Build a Skyscanner deep-link URL."""
     params = f"?adults={adults}"
     if SKYSCANNER_AFFILIATE_ID:
         params += f"&associateid={SKYSCANNER_AFFILIATE_ID}"
@@ -59,7 +62,6 @@ def booking_url(dest: str, checkin: str, checkout: str, adults: int, rooms: int)
     return f"https://www.booking.com/searchresults.html?{params}"
 
 def claude_json(prompt: str, model: str = "claude-haiku-4-5-20251001", max_tokens: int = 1000) -> dict:
-    """Call Claude and parse JSON from the response."""
     resp = claude.messages.create(
         model=model,
         max_tokens=max_tokens,
@@ -81,7 +83,6 @@ def get_first_weekend(month_name: str):
     if date(year, month, 1) < date.today():
         year += 1
     d = date(year, month, 1)
-    # Find first Friday
     while d.weekday() != 4:
         d += timedelta(days=1)
     return d.isoformat(), (d + timedelta(days=3)).isoformat()
@@ -186,37 +187,37 @@ class WelcomeEmailRequest(BaseModel):
 
 # ── UK Airport list ───────────────────────────────────────────────────────────
 UK_AIRPORTS = [
-    {"label": "Aberdeen (ABZ)",                             "value": "aberdeen",     "sky": "ABZ",  "iata": ["ABZ"]},
-    {"label": "Belfast — all airports (BFS/BHD)",           "value": "belfast",      "sky": "BELF", "iata": ["BFS","BHD"]},
-    {"label": "Birmingham (BHX)",                           "value": "birmingham",   "sky": "BHX",  "iata": ["BHX"]},
-    {"label": "Bournemouth (BOH)",                          "value": "bournemouth",  "sky": "BOH",  "iata": ["BOH"]},
-    {"label": "Bristol (BRS)",                              "value": "bristol",      "sky": "BRS",  "iata": ["BRS"]},
-    {"label": "Cardiff (CWL)",                              "value": "cardiff",      "sky": "CWL",  "iata": ["CWL"]},
-    {"label": "Doncaster Sheffield (DSA)",                  "value": "doncaster",    "sky": "DSA",  "iata": ["DSA"]},
-    {"label": "East Midlands (EMA)",                        "value": "east midlands","sky": "EMA",  "iata": ["EMA"]},
-    {"label": "Edinburgh (EDI)",                            "value": "edinburgh",    "sky": "EDI",  "iata": ["EDI"]},
-    {"label": "Exeter (EXT)",                               "value": "exeter",       "sky": "EXT",  "iata": ["EXT"]},
-    {"label": "Glasgow — all airports (GLA/PIK)",           "value": "glasgow",      "sky": "GLAS", "iata": ["GLA","PIK"]},
-    {"label": "Glasgow Prestwick (PIK)",                    "value": "prestwick",    "sky": "PIK",  "iata": ["PIK"]},
-    {"label": "Guernsey (GCI)",                             "value": "guernsey",     "sky": "GCI",  "iata": ["GCI"]},
-    {"label": "Inverness (INV)",                            "value": "inverness",    "sky": "INV",  "iata": ["INV"]},
-    {"label": "Isle of Man (IOM)",                          "value": "isle of man",  "sky": "IOM",  "iata": ["IOM"]},
-    {"label": "Jersey (JER)",                               "value": "jersey",       "sky": "JER",  "iata": ["JER"]},
-    {"label": "Leeds Bradford (LBA)",                       "value": "leeds",        "sky": "LBA",  "iata": ["LBA"]},
-    {"label": "Liverpool (LPL)",                            "value": "liverpool",    "sky": "LPL",  "iata": ["LPL"]},
-    {"label": "London — all airports (LHR/LGW/STN/LTN/LCY)","value": "london",     "sky": "LOND", "iata": ["LHR","LGW","STN","LTN","LCY"]},
-    {"label": "London City (LCY)",                          "value": "london city",  "sky": "LCY",  "iata": ["LCY"]},
-    {"label": "London Gatwick (LGW)",                       "value": "gatwick",      "sky": "LGW",  "iata": ["LGW"]},
-    {"label": "London Heathrow (LHR)",                      "value": "heathrow",     "sky": "LHR",  "iata": ["LHR"]},
-    {"label": "London Luton (LTN)",                         "value": "luton",        "sky": "LTN",  "iata": ["LTN"]},
-    {"label": "London Southend (SEN)",                      "value": "southend",     "sky": "SEN",  "iata": ["SEN"]},
-    {"label": "London Stansted (STN)",                      "value": "stansted",     "sky": "STN",  "iata": ["STN"]},
-    {"label": "Manchester (MAN)",                           "value": "manchester",   "sky": "MAN",  "iata": ["MAN"]},
-    {"label": "Newcastle (NCL)",                            "value": "newcastle",    "sky": "NCL",  "iata": ["NCL"]},
-    {"label": "Newquay (NQY)",                              "value": "newquay",      "sky": "NQY",  "iata": ["NQY"]},
-    {"label": "Norwich (NWI)",                              "value": "norwich",      "sky": "NWI",  "iata": ["NWI"]},
-    {"label": "Southampton (SOU)",                          "value": "southampton",  "sky": "SOU",  "iata": ["SOU"]},
-    {"label": "Teesside / Durham (MME)",                    "value": "teesside",     "sky": "MME",  "iata": ["MME"]},
+    {"label": "Aberdeen (ABZ)",                              "value": "aberdeen",      "sky": "ABZ",  "iata": ["ABZ"]},
+    {"label": "Belfast — all airports (BFS/BHD)",            "value": "belfast",       "sky": "BELF", "iata": ["BFS","BHD"]},
+    {"label": "Birmingham (BHX)",                            "value": "birmingham",    "sky": "BHX",  "iata": ["BHX"]},
+    {"label": "Bournemouth (BOH)",                           "value": "bournemouth",   "sky": "BOH",  "iata": ["BOH"]},
+    {"label": "Bristol (BRS)",                               "value": "bristol",       "sky": "BRS",  "iata": ["BRS"]},
+    {"label": "Cardiff (CWL)",                               "value": "cardiff",       "sky": "CWL",  "iata": ["CWL"]},
+    {"label": "Doncaster Sheffield (DSA)",                   "value": "doncaster",     "sky": "DSA",  "iata": ["DSA"]},
+    {"label": "East Midlands (EMA)",                         "value": "east midlands", "sky": "EMA",  "iata": ["EMA"]},
+    {"label": "Edinburgh (EDI)",                             "value": "edinburgh",     "sky": "EDI",  "iata": ["EDI"]},
+    {"label": "Exeter (EXT)",                                "value": "exeter",        "sky": "EXT",  "iata": ["EXT"]},
+    {"label": "Glasgow — all airports (GLA/PIK)",            "value": "glasgow",       "sky": "GLAS", "iata": ["GLA","PIK"]},
+    {"label": "Glasgow Prestwick (PIK)",                     "value": "prestwick",     "sky": "PIK",  "iata": ["PIK"]},
+    {"label": "Guernsey (GCI)",                              "value": "guernsey",      "sky": "GCI",  "iata": ["GCI"]},
+    {"label": "Inverness (INV)",                             "value": "inverness",     "sky": "INV",  "iata": ["INV"]},
+    {"label": "Isle of Man (IOM)",                           "value": "isle of man",   "sky": "IOM",  "iata": ["IOM"]},
+    {"label": "Jersey (JER)",                                "value": "jersey",        "sky": "JER",  "iata": ["JER"]},
+    {"label": "Leeds Bradford (LBA)",                        "value": "leeds",         "sky": "LBA",  "iata": ["LBA"]},
+    {"label": "Liverpool (LPL)",                             "value": "liverpool",     "sky": "LPL",  "iata": ["LPL"]},
+    {"label": "London — all airports (LHR/LGW/STN/LTN/LCY)","value": "london",        "sky": "LOND", "iata": ["LHR","LGW","STN","LTN","LCY"]},
+    {"label": "London City (LCY)",                           "value": "london city",   "sky": "LCY",  "iata": ["LCY"]},
+    {"label": "London Gatwick (LGW)",                        "value": "gatwick",       "sky": "LGW",  "iata": ["LGW"]},
+    {"label": "London Heathrow (LHR)",                       "value": "heathrow",      "sky": "LHR",  "iata": ["LHR"]},
+    {"label": "London Luton (LTN)",                          "value": "luton",         "sky": "LTN",  "iata": ["LTN"]},
+    {"label": "London Southend (SEN)",                       "value": "southend",      "sky": "SEN",  "iata": ["SEN"]},
+    {"label": "London Stansted (STN)",                       "value": "stansted",      "sky": "STN",  "iata": ["STN"]},
+    {"label": "Manchester (MAN)",                            "value": "manchester",    "sky": "MAN",  "iata": ["MAN"]},
+    {"label": "Newcastle (NCL)",                             "value": "newcastle",     "sky": "NCL",  "iata": ["NCL"]},
+    {"label": "Newquay (NQY)",                               "value": "newquay",       "sky": "NQY",  "iata": ["NQY"]},
+    {"label": "Norwich (NWI)",                               "value": "norwich",       "sky": "NWI",  "iata": ["NWI"]},
+    {"label": "Southampton (SOU)",                           "value": "southampton",   "sky": "SOU",  "iata": ["SOU"]},
+    {"label": "Teesside / Durham (MME)",                     "value": "teesside",      "sky": "MME",  "iata": ["MME"]},
 ]
 
 @app.get("/api/uk-airports")
@@ -227,7 +228,6 @@ def get_uk_airports():
 # ── Destination airports ──────────────────────────────────────────────────────
 @app.post("/api/dest-airports")
 def get_dest_airports(req: AirportsRequest):
-    """Ask Claude for the airports serving a destination city."""
     prompt = (
         f"List the main airports serving {req.dest_city} for international flights from the UK. "
         "Return ONLY valid JSON:\n"
@@ -245,7 +245,7 @@ def get_dest_airports(req: AirportsRequest):
         raise HTTPException(500, str(e))
 
 
-# ── Inspire ───────────────────────────────────────────────────────────────────
+# ── Photo ─────────────────────────────────────────────────────────────────────
 @app.get("/api/photo")
 def get_photo(query: str):
     try:
@@ -270,9 +270,9 @@ def get_photo(query: str):
         return {"url": None}
 
 
+# ── Inspire ───────────────────────────────────────────────────────────────────
 @app.post("/api/inspire")
 def inspire(req: InspireRequest):
-    """Generate 1-3 destination suggestions."""
     trip_type_text = " / ".join(req.trip_type) if req.trip_type else "Any"
     date_text = (
         f"{req.specific_depart} to {req.specific_return}"
@@ -283,7 +283,6 @@ def inspire(req: InspireRequest):
         else "Open to car hire"
     )
 
-    # Determine number of suggestions based on dest_preference
     dp = (req.dest_preference or "").strip()
     known_regions = [
         "portugal","spain","france","italy","greece","turkey","croatia","morocco",
@@ -361,10 +360,8 @@ Return exactly {n_dest} destination(s). No other text."""
                 if key == "HIGHLIGHTS":
                     continue
                 d[key] = val
-        # Parse highlights
         highlights = [l.strip().lstrip("•").strip() for l in body.split("\n") if l.strip().startswith("•")]
         d["highlights"] = highlights
-        # Parse cost guide
         cost_lines = []
         in_cost = False
         for line in body.split("\n"):
@@ -383,7 +380,6 @@ Return exactly {n_dest} destination(s). No other text."""
 # ── Itinerary (streaming) ─────────────────────────────────────────────────────
 @app.post("/api/itinerary")
 def build_itinerary(req: ItineraryRequest):
-    """Stream the full itinerary as it generates."""
     trip_type_text = " / ".join(req.trip_type) if req.trip_type else "City Break"
     date_text = (
         f"{req.specific_depart} to {req.specific_return}"
@@ -399,7 +395,6 @@ def build_itinerary(req: ItineraryRequest):
     elif "public transport" in req.transport_mode.lower():
         car_hire_note = "This traveller is using PUBLIC TRANSPORT ONLY — no car hire at any point."
 
-    # Build personalisation block from user profile
     profile_text = ""
     if req.user_profile:
         p = req.user_profile
@@ -407,10 +402,20 @@ def build_itinerary(req: ItineraryRequest):
         if p.get("age_range"):
             lines.append(f"- Age range: {p['age_range']}")
         if p.get("activity_level"):
-            activity_map = {1:"very relaxed (minimal walking, lots of rest)", 2:"gentle (light sightseeing, easy pace)", 3:"balanced (mix of activity and downtime)", 4:"active (plenty of walking, some physical activities)", 5:"very active (hiking, cycling, packed days)"}
+            activity_map = {
+                1: "very relaxed (minimal walking, lots of rest)",
+                2: "gentle (light sightseeing, easy pace)",
+                3: "balanced (mix of activity and downtime)",
+                4: "active (plenty of walking, some physical activities)",
+                5: "very active (hiking, cycling, packed days)",
+            }
             lines.append(f"- Activity preference: {activity_map.get(p['activity_level'], p['activity_level'])}")
         if p.get("dietary"):
-            labels = {"vegan":"vegan","vegetarian":"vegetarian","pescatarian":"pescatarian","gluten_free":"gluten free","halal":"halal","kosher":"kosher","nut_allergy":"nut allergy","dairy_free":"dairy free"}
+            labels = {
+                "vegan": "vegan", "vegetarian": "vegetarian", "pescatarian": "pescatarian",
+                "gluten_free": "gluten free", "halal": "halal", "kosher": "kosher",
+                "nut_allergy": "nut allergy", "dairy_free": "dairy free",
+            }
             diets = [labels.get(d, d) for d in p["dietary"]]
             lines.append(f"- Dietary requirements: {', '.join(diets)}")
         if p.get("dietary_other"):
@@ -492,7 +497,6 @@ def car_hire(req: CarHireRequest):
         '{"name": "...", "rating": "8.5/10", "highlight": "..."}], '
         '"avoid": [{"name": "...", "rating": "5.1/10", "reason": "..."}]}'
     )
-    # Build Rentalcars URL
     rc_url = ""
     if req.depart_date and req.return_date:
         rc_url = (
@@ -556,7 +560,7 @@ def hotel_note(req: HotelNoteRequest):
         raise HTTPException(500, str(e))
 
 
-# ── GYG Activities ────────────────────────────────────────────────────────────
+# ── Activities ────────────────────────────────────────────────────────────────
 @app.post("/api/activities")
 def activities(req: ActivitiesRequest):
     prompt = (
@@ -589,9 +593,9 @@ def activities(req: ActivitiesRequest):
                 f"https://www.getyourguide.com/s/?q={q}"
             )
 
+        from urllib.parse import quote
         direct_list = data.get("direct", [])
         for d in direct_list:
-            from urllib.parse import quote
             query = f"{d.get('name', '')} {req.dest_city}".strip()
             d["instagram_url"] = f"https://www.instagram.com/search/top/?q={quote(query)}"
 
@@ -624,16 +628,37 @@ def tweak_itinerary(req: TweakRequest):
     return StreamingResponse(generate(), media_type="text/event-stream")
 
 
-# ── Map pins ──────────────────────────────────────────────────────────────────
+# ── Map pins (with server-side Google geocoding) ──────────────────────────────
 @app.post("/api/map-pins")
 def map_pins(req: MapPinsRequest):
     prompt = (
         f"Extract all named locations from this {req.dest_city} itinerary as map pins.\n\n"
         f"{req.itinerary[:4000]}\n\n"
-        'Return ONLY valid JSON: {"locations": [{"name":"...", "type":"Restaurant|Attraction|Hotel|Museum|Bar|Market|Park|Viewpoint|Beach", "description":"one line"}]}'
+        'Return ONLY valid JSON: {"locations": [{"name":"...", '
+        '"type":"Restaurant|Cafe|Bar|Attraction|Museum|Market|Park|Viewpoint|Beach|Hotel", '
+        '"description":"one line"}]}'
     )
     try:
-        return claude_json(prompt, max_tokens=800)
+        data = claude_json(prompt, max_tokens=800)
+        locations = data.get("locations", [])
+
+        if GOOGLE_MAPS_API_KEY:
+            for loc in locations:
+                try:
+                    query = f"{loc['name']}, {req.dest_city}"
+                    geo_resp = requests.get(
+                        "https://maps.googleapis.com/maps/api/geocode/json",
+                        params={"address": query, "key": GOOGLE_MAPS_API_KEY},
+                        timeout=5,
+                    ).json()
+                    if geo_resp.get("results"):
+                        coords = geo_resp["results"][0]["geometry"]["location"]
+                        loc["lat"] = coords["lat"]
+                        loc["lng"] = coords["lng"]
+                except Exception:
+                    pass  # Pin will appear in list only, not on map
+
+        return {"locations": locations}
     except Exception as e:
         raise HTTPException(500, str(e))
 
@@ -665,7 +690,7 @@ def chat(req: ChatRequest):
     return {"reply": resp.content[0].text.strip()}
 
 
-# ── Local guide: nearby places ────────────────────────────────────────────────
+# ── Nearby places ─────────────────────────────────────────────────────────────
 @app.post("/api/nearby")
 def nearby(req: LocalGuideRequest):
     prompt = (
@@ -681,7 +706,7 @@ def nearby(req: LocalGuideRequest):
         raise HTTPException(500, str(e))
 
 
-# ── Local guide: history ──────────────────────────────────────────────────────
+# ── Local history ─────────────────────────────────────────────────────────────
 @app.post("/api/history")
 def history(req: LocalGuideRequest):
     prompt = (
@@ -698,15 +723,15 @@ def history(req: LocalGuideRequest):
     return {"history": resp.content[0].text.strip()}
 
 
-# ── Affiliate URL builders ────────────────────────────────────────────────────
+# ── Config ────────────────────────────────────────────────────────────────────
 @app.get("/api/config")
 def get_config():
-    """Return affiliate IDs and config needed by the frontend."""
     return {
         "skyscanner_affiliate": SKYSCANNER_AFFILIATE_ID,
-        "booking_affiliate": BOOKING_AFFILIATE_ID,
-        "gyg_partner": GYG_PARTNER_ID,
+        "booking_affiliate":    BOOKING_AFFILIATE_ID,
+        "gyg_partner":          GYG_PARTNER_ID,
         "rentalcars_affiliate": RENTALCARS_AFFILIATE_ID,
+        "google_maps_key":      GOOGLE_MAPS_API_KEY,
     }
 
 

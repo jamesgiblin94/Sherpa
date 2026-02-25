@@ -1,3 +1,4 @@
+import MapTab from './MapTab'
 import { useState, useRef, useEffect } from 'react'
 import SherpaSpinner from './SherpaSpinner'
 import { api } from '../utils/api'
@@ -230,7 +231,7 @@ function DayPhoto({ day, destCity }) {
   )
 }
 
-// ── Venue card with photo ──────────────────────────────────────────────────────
+// ── Venue card ────────────────────────────────────────────────────────────────
 function VenueCard({ venue, typeIcon, destCity }) {
   const [photo, setPhoto] = useState(null)
 
@@ -250,9 +251,7 @@ function VenueCard({ venue, typeIcon, destCity }) {
           }
         </div>
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5 mb-0.5">
-            <p className="font-medium text-sm truncate" style={{color:'#f0ede8'}}>{venue.name}</p>
-          </div>
+          <p className="font-medium text-sm truncate" style={{color:'#f0ede8'}}>{venue.name}</p>
           <p className="text-xs leading-relaxed" style={{color:'#a0a098'}}>{venue.note}</p>
         </div>
         <a href={venue.instagram_url} target="_blank" rel="noopener noreferrer"
@@ -265,7 +264,7 @@ function VenueCard({ venue, typeIcon, destCity }) {
   )
 }
 
-// ── Language phrase lookup ─────────────────────────────────────────────────────
+// ── Language phrase ────────────────────────────────────────────────────────────
 const PHRASE_CACHE = {}
 
 function LanguagePhrase({ dest, phrase }) {
@@ -290,494 +289,6 @@ function LanguagePhrase({ dest, phrase }) {
     <span className="text-xs font-medium" style={{color:'#a8c9ad'}}>
       {translation || '…'}
     </span>
-  )
-}
-
-// ── Map category config ────────────────────────────────────────────────────────
-const CATEGORY_CONFIG = {
-  Restaurant: { color: '#f97316', bg: 'rgba(249,115,22,0.15)', border: 'rgba(249,115,22,0.3)', icon: '🍽️', label: 'Restaurants' },
-  Cafe:       { color: '#d97706', bg: 'rgba(217,119,6,0.15)',  border: 'rgba(217,119,6,0.3)',  icon: '☕',  label: 'Cafes' },
-  Bar:        { color: '#a855f7', bg: 'rgba(168,85,247,0.15)', border: 'rgba(168,85,247,0.3)', icon: '🍸',  label: 'Bars' },
-  Museum:     { color: '#3b82f6', bg: 'rgba(59,130,246,0.15)', border: 'rgba(59,130,246,0.3)', icon: '🏛️', label: 'Museums' },
-  Attraction: { color: '#eab308', bg: 'rgba(234,179,8,0.15)',  border: 'rgba(234,179,8,0.3)',  icon: '⭐',  label: 'Attractions' },
-  Market:     { color: '#22c55e', bg: 'rgba(34,197,94,0.15)',  border: 'rgba(34,197,94,0.3)',  icon: '🛒',  label: 'Markets' },
-  Park:       { color: '#10b981', bg: 'rgba(16,185,129,0.15)', border: 'rgba(16,185,129,0.3)', icon: '🌿',  label: 'Parks' },
-  Viewpoint:  { color: '#06b6d4', bg: 'rgba(6,182,212,0.15)',  border: 'rgba(6,182,212,0.3)',  icon: '👁️', label: 'Viewpoints' },
-  Beach:      { color: '#14b8a6', bg: 'rgba(20,184,166,0.15)', border: 'rgba(20,184,166,0.3)', icon: '🏖️', label: 'Beaches' },
-  Hotel:      { color: '#ef4444', bg: 'rgba(239,68,68,0.15)',  border: 'rgba(239,68,68,0.3)',  icon: '🏨',  label: 'Hotels' },
-}
-
-const DEFAULT_CAT = { color: '#a0a098', bg: 'rgba(160,160,152,0.15)', border: 'rgba(160,160,152,0.3)', icon: '📍', label: 'Other' }
-
-function getCat(type) {
-  return CATEGORY_CONFIG[type] || DEFAULT_CAT
-}
-
-function groupByCategory(pins) {
-  const groups = {}
-  for (const pin of pins) {
-    const cat = pin.type || 'Other'
-    if (!groups[cat]) groups[cat] = []
-    groups[cat].push(pin)
-  }
-  return groups
-}
-
-function pinMapsUrl(name, city) {
-  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(name + ' ' + city)}`
-}
-
-// ── Geocode using Nominatim (free, no API key) ────────────────────────────────
-const GEOCODE_CACHE = {}
-
-async function geocodePin(name, city) {
-  const key = `${name}|${city}`
-  if (GEOCODE_CACHE[key]) return GEOCODE_CACHE[key]
-
-  try {
-    const q = encodeURIComponent(`${name}, ${city}`)
-    const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=1`, {
-      headers: { 'Accept-Language': 'en' }
-    })
-    const data = await res.json()
-    if (data.length > 0) {
-      const result = { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) }
-      GEOCODE_CACHE[key] = result
-      return result
-    }
-  } catch {}
-
-  try {
-    const q = encodeURIComponent(name)
-    const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=1`, {
-      headers: { 'Accept-Language': 'en' }
-    })
-    const data = await res.json()
-    if (data.length > 0) {
-      const result = { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) }
-      GEOCODE_CACHE[key] = result
-      return result
-    }
-  } catch {}
-
-  return null
-}
-
-async function geocodeAllPins(pins, city) {
-  const results = []
-  for (const pin of pins) {
-    const coords = await geocodePin(pin.name, city)
-    if (coords) {
-      results.push({ ...pin, lat: coords.lat, lng: coords.lng })
-    } else {
-      results.push({ ...pin, lat: null, lng: null })
-    }
-    await new Promise(r => setTimeout(r, 300))
-  }
-  return results
-}
-
-// ── KML file generation ────────────────────────────────────────────────────────
-function generateKML(pins, city, emoji) {
-  const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-
-  function hexToKml(hex) {
-    const r = hex.slice(1, 3)
-    const g = hex.slice(3, 5)
-    const b = hex.slice(5, 7)
-    return `ff${b}${g}${r}`
-  }
-
-  const validPins = pins.filter(p => p.lat && p.lng)
-
-  let kml = `<?xml version="1.0" encoding="UTF-8"?>
-<kml xmlns="http://www.opengis.net/kml/2.2">
-<Document>
-  <name>${esc(emoji + ' ' + city + ' Itinerary')}</name>
-  <description>Generated by Sherpa - sherpatravel.uk</description>
-`
-
-  const usedCats = [...new Set(validPins.map(p => p.type || 'Other'))]
-  for (const cat of usedCats) {
-    const cfg = getCat(cat)
-    kml += `  <Style id="style-${esc(cat)}">
-    <IconStyle>
-      <color>${hexToKml(cfg.color)}</color>
-      <scale>1.2</scale>
-      <Icon>
-        <href>https://maps.google.com/mapfiles/kml/paddle/${cfg.color.replace('#', '').toUpperCase().slice(0,2)}.png</href>
-      </Icon>
-    </IconStyle>
-    <LabelStyle>
-      <color>${hexToKml(cfg.color)}</color>
-    </LabelStyle>
-  </Style>
-`
-  }
-
-  for (const cat of usedCats) {
-    const cfg = getCat(cat)
-    const catPins = validPins.filter(p => (p.type || 'Other') === cat)
-    kml += `  <Folder>
-    <name>${esc(cfg.icon + ' ' + cfg.label)}</name>
-`
-    for (const pin of catPins) {
-      kml += `    <Placemark>
-      <name>${esc(pin.name)}</name>
-      <description>${esc(pin.description || '')}</description>
-      <styleUrl>#style-${esc(cat)}</styleUrl>
-      <Point>
-        <coordinates>${pin.lng},${pin.lat},0</coordinates>
-      </Point>
-    </Placemark>
-`
-    }
-    kml += `  </Folder>
-`
-  }
-
-  kml += `</Document>
-</kml>`
-
-  return kml
-}
-
-function downloadKML(pins, city, emoji, destCity) {
-  track('map_export', { format: 'kml', destination: destCity })
-  const kml = generateKML(pins, city, emoji)
-  const blob = new Blob([kml], { type: 'application/vnd.google-earth.kml+xml' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `${city.toLowerCase().replace(/\s+/g, '-')}-itinerary.kml`
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  URL.revokeObjectURL(url)
-}
-
-// ── Map Pin Card ───────────────────────────────────────────────────────────────
-function MapPinCard({ pin, city }) {
-  const cat = getCat(pin.type)
-  const hasCoords = pin.lat && pin.lng
-  return (
-    <a href={pinMapsUrl(pin.name, city)} target="_blank" rel="noopener noreferrer"
-       className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all"
-       style={{ background: cat.bg, border: `1px solid ${cat.border}` }}
-       onMouseEnter={e => { e.currentTarget.style.transform = 'translateX(4px)'; e.currentTarget.style.borderColor = cat.color }}
-       onMouseLeave={e => { e.currentTarget.style.transform = 'translateX(0)'; e.currentTarget.style.borderColor = cat.border }}>
-      <span className="text-lg shrink-0">{cat.icon}</span>
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium truncate" style={{color:'#f0ede8'}}>{pin.name}</p>
-        {pin.description && (
-          <p className="text-xs truncate" style={{color: cat.color}}>{pin.description}</p>
-        )}
-      </div>
-      {!hasCoords && <span className="text-xs shrink-0" style={{color:'#7a7870'}}>📍</span>}
-      <span className="text-xs shrink-0" style={{color:'#7a7870'}}>Open ↗</span>
-    </a>
-  )
-}
-
-// ── Leaflet Map Component ──────────────────────────────────────────────────────
-function LeafletMap({ pins, city }) {
-  const mapRef = useRef(null)
-  const mapInstanceRef = useRef(null)
-
-  useEffect(() => {
-    if (!document.getElementById('leaflet-css')) {
-      const link = document.createElement('link')
-      link.id = 'leaflet-css'
-      link.rel = 'stylesheet'
-      link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'
-      document.head.appendChild(link)
-    }
-
-    const loadLeaflet = () => {
-      return new Promise((resolve) => {
-        if (window.L) { resolve(window.L); return }
-        const script = document.createElement('script')
-        script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
-        script.onload = () => resolve(window.L)
-        document.head.appendChild(script)
-      })
-    }
-
-    const validPins = pins.filter(p => p.lat && p.lng)
-    if (validPins.length === 0 || !mapRef.current) return
-
-    loadLeaflet().then(L => {
-      if (mapInstanceRef.current) {
-        mapInstanceRef.current.remove()
-        mapInstanceRef.current = null
-      }
-
-      const map = L.map(mapRef.current, { zoomControl: true, attributionControl: true })
-      mapInstanceRef.current = map
-
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-        attribution: '&copy; OpenStreetMap &copy; CARTO',
-        maxZoom: 19,
-      }).addTo(map)
-
-      const markers = []
-      for (const pin of validPins) {
-        const cat = getCat(pin.type)
-
-        const iconHtml = `<div style="
-          width: 32px; height: 32px;
-          background: ${cat.color};
-          border: 2px solid #fff;
-          border-radius: 50%;
-          display: flex; align-items: center; justify-content: center;
-          font-size: 14px; line-height: 1;
-          box-shadow: 0 2px 6px rgba(0,0,0,0.4);
-        ">${cat.icon}</div>`
-
-        const icon = L.divIcon({
-          html: iconHtml,
-          className: '',
-          iconSize: [32, 32],
-          iconAnchor: [16, 16],
-          popupAnchor: [0, -18],
-        })
-
-        const marker = L.marker([pin.lat, pin.lng], { icon }).addTo(map)
-        marker.bindPopup(`
-          <div style="font-family:Inter,sans-serif;min-width:140px;">
-            <strong style="font-size:13px;">${cat.icon} ${pin.name}</strong>
-            ${pin.description ? `<br/><span style="font-size:11px;color:#666;">${pin.description}</span>` : ''}
-            <br/><a href="${pinMapsUrl(pin.name, city)}" target="_blank" style="font-size:11px;color:#4285f4;">Open in Google Maps ↗</a>
-          </div>
-        `)
-        markers.push(marker)
-      }
-
-      if (markers.length > 0) {
-        const group = L.featureGroup(markers)
-        map.fitBounds(group.getBounds().pad(0.15))
-      }
-    })
-
-    return () => {
-      if (mapInstanceRef.current) {
-        mapInstanceRef.current.remove()
-        mapInstanceRef.current = null
-      }
-    }
-  }, [pins])
-
-  const validCount = pins.filter(p => p.lat && p.lng).length
-  if (validCount === 0) return null
-
-  return (
-    <div ref={mapRef} className="rounded-xl overflow-hidden" style={{height: 320, border:'1px solid rgba(127,182,133,0.2)'}} />
-  )
-}
-
-// ── Map Tab Content ────────────────────────────────────────────────────────────
-function MapTab({ dest, itinerary }) {
-  const [pins, setPins] = useState(null)
-  const [loading, setLoading] = useState(false)
-  const [geocoding, setGeocoding] = useState(false)
-  const [activeFilter, setActiveFilter] = useState('all')
-
-  const city = dest?.CITY || ''
-
-  const handleDownloadCSV = () => {
-    track('map_export', { format: 'csv', destination: dest?.CITY })
-    const validPins = pins.filter(p => p.lat && p.lng)
-    const rows = [['Name', 'Category', 'Description', 'Latitude', 'Longitude']]
-    for (const pin of validPins) {
-      const cat = getCat(pin.type)
-      rows.push([
-        pin.name,
-        cat.label,
-        (pin.description || '').replace(/,/g, ';'),
-        pin.lat,
-        pin.lng,
-      ])
-    }
-    const csv = rows.map(r => r.map(c => `"${c}"`).join(',')).join('\n')
-    const blob = new Blob([csv], { type: 'text/csv' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `${city.toLowerCase().replace(/\s+/g, '-')}-itinerary.csv`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
-  }
-
-  useEffect(() => {
-    if (!itinerary || !dest?.CITY || pins) return
-    setLoading(true)
-    api.mapPins({ itinerary, dest_city: dest.CITY })
-      .then(async (d) => {
-        const rawPins = d.locations || []
-        setLoading(false)
-        setGeocoding(true)
-        const geocoded = await geocodeAllPins(rawPins, dest.CITY)
-        setPins(geocoded)
-        setGeocoding(false)
-      })
-      .catch(() => { setPins([]); setLoading(false) })
-  }, [itinerary, dest?.CITY])
-
-  if (loading) {
-    return (
-      <div className="py-8">
-        <SherpaSpinner messages={['Mapping your itinerary...', 'Finding all the spots...', 'Pinning locations...']} />
-      </div>
-    )
-  }
-
-  if (!pins || pins.length === 0) {
-    return (
-      <div className="text-center py-8">
-        <p className="text-sm" style={{color:'#a0a098'}}>No map pins found for this itinerary.</p>
-      </div>
-    )
-  }
-
-  const grouped = groupByCategory(pins)
-  const categories = Object.keys(grouped).sort()
-  const filteredPins = activeFilter === 'all' ? pins : pins.filter(p => (p.type || 'Other') === activeFilter)
-  const geocodedCount = pins.filter(p => p.lat && p.lng).length
-
-  return (
-    <div className="space-y-4">
-
-      {geocoding && (
-        <div className="rounded-xl p-4 text-center" style={{background:'#1a2020', border:'1px solid rgba(127,182,133,0.15)'}}>
-          <SherpaSpinner messages={['Placing pins on the map...', 'Finding coordinates...', 'Nearly there...']} />
-        </div>
-      )}
-
-      {!geocoding && geocodedCount > 0 && (
-        <LeafletMap pins={filteredPins} city={city} />
-      )}
-
-      {!geocoding && geocodedCount > 0 && (
-        <div className="rounded-xl p-4 space-y-4" style={{background:'#1a2020', border:'1px solid rgba(127,182,133,0.2)'}}>
-          <p className="text-xs font-bold uppercase tracking-widest" style={{color:'#7fb685'}}>
-            Export to Google Maps
-          </p>
-
-          <div className="flex gap-2">
-            <button
-              onClick={() => downloadKML(pins, city, dest?.EMOJI || '📍', dest?.CITY)}
-              className="flex-1 flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-medium transition-all"
-              style={{background:'#34a853', color:'#fff'}}
-              onMouseEnter={e => e.currentTarget.style.background='#2d9249'}
-              onMouseLeave={e => e.currentTarget.style.background='#34a853'}>
-              <span>📥</span>
-              KML file
-            </button>
-
-            <button
-              onClick={handleDownloadCSV}
-              className="flex-1 flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-medium transition-all"
-              style={{background:'#4285f4', color:'#fff'}}
-              onMouseEnter={e => e.currentTarget.style.background='#3367d6'}
-              onMouseLeave={e => e.currentTarget.style.background='#4285f4'}>
-              <span>📊</span>
-              CSV file
-            </button>
-          </div>
-
-          <div className="space-y-3">
-            <div className="rounded-lg p-3" style={{background:'rgba(52,168,83,0.08)', border:'1px solid rgba(52,168,83,0.15)'}}>
-              <p className="text-xs font-semibold mb-1.5" style={{color:'#34a853'}}>📱 Mobile (KML)</p>
-              <div className="space-y-1">
-                <p className="text-xs" style={{color:'#a0a098'}}>1. Download the KML file</p>
-                <p className="text-xs" style={{color:'#a0a098'}}>2. Open it and select Google Maps</p>
-                <p className="text-xs" style={{color:'#a0a098'}}>3. All pins appear on your map instantly</p>
-              </div>
-            </div>
-
-            <div className="rounded-lg p-3" style={{background:'rgba(66,133,244,0.08)', border:'1px solid rgba(66,133,244,0.15)'}}>
-              <p className="text-xs font-semibold mb-1.5" style={{color:'#4285f4'}}>💻 Desktop (CSV)</p>
-              <div className="space-y-1">
-                <p className="text-xs" style={{color:'#a0a098'}}>1. Download the CSV file</p>
-                <p className="text-xs" style={{color:'#a0a098'}}>2. Go to <a href="https://www.google.com/maps/d/" target="_blank" rel="noopener noreferrer" style={{color:'#4285f4', textDecoration:'underline'}}>Google My Maps</a> and create a new map</p>
-                <p className="text-xs" style={{color:'#a0a098'}}>3. Click Import and upload the CSV</p>
-                <p className="text-xs" style={{color:'#a0a098'}}>4. Select Latitude and Longitude as position columns</p>
-                <p className="text-xs" style={{color:'#a0a098'}}>5. Select Name as the title column</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div className="rounded-xl p-3" style={{background:'#1a2020', border:'1px solid rgba(127,182,133,0.15)'}}>
-        <p className="text-xs uppercase tracking-widest mb-2" style={{color:'#7a7870'}}>Filter by category</p>
-        <div className="flex flex-wrap gap-1.5">
-          <button
-            onClick={() => setActiveFilter('all')}
-            className="text-xs px-2.5 py-1 rounded-full transition-all"
-            style={{
-              background: activeFilter === 'all' ? 'rgba(127,182,133,0.2)' : 'transparent',
-              color: activeFilter === 'all' ? '#7fb685' : '#7a7870',
-              border: `1px solid ${activeFilter === 'all' ? 'rgba(127,182,133,0.4)' : 'rgba(255,255,255,0.08)'}`,
-            }}>
-            All ({pins.length})
-          </button>
-          {categories.map(cat => {
-            const cfg = getCat(cat)
-            const count = grouped[cat].length
-            return (
-              <button key={cat}
-                onClick={() => setActiveFilter(activeFilter === cat ? 'all' : cat)}
-                className="text-xs px-2.5 py-1 rounded-full transition-all"
-                style={{
-                  background: activeFilter === cat ? cfg.bg : 'transparent',
-                  color: activeFilter === cat ? cfg.color : '#7a7870',
-                  border: `1px solid ${activeFilter === cat ? cfg.border : 'rgba(255,255,255,0.08)'}`,
-                }}>
-                {cfg.icon} {cfg.label} ({count})
-              </button>
-            )
-          })}
-        </div>
-      </div>
-
-      <p className="text-xs" style={{color:'#7a7870'}}>
-        Showing {filteredPins.length} of {pins.length} locations
-        {geocodedCount < pins.length && ` · ${geocodedCount} mapped`}
-      </p>
-
-      <div className="space-y-2">
-        {activeFilter === 'all' ? (
-          categories.map(cat => {
-            const cfg = getCat(cat)
-            return (
-              <div key={cat}>
-                <div className="flex items-center gap-2 mb-2 mt-4 first:mt-0">
-                  <span>{cfg.icon}</span>
-                  <p className="text-xs font-bold uppercase tracking-widest" style={{color: cfg.color}}>
-                    {cfg.label}
-                  </p>
-                  <div className="flex-1 h-px" style={{background: cfg.border}} />
-                </div>
-                <div className="space-y-1.5">
-                  {grouped[cat].map((pin, i) => (
-                    <MapPinCard key={i} pin={pin} city={city} />
-                  ))}
-                </div>
-              </div>
-            )
-          })
-        ) : (
-          <div className="space-y-1.5">
-            {filteredPins.map((pin, i) => (
-              <MapPinCard key={i} pin={pin} city={city} />
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
   )
 }
 
@@ -811,11 +322,11 @@ export default function ItineraryModal({
   const scrollTop = () => scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
 
   const tabs = [
-    { id: 'overview', label: '🗺️ Overview'   },
-    { id: 'days',     label: '📅 Day by Day'  },
-    { id: 'map',      label: '📍 Map'         },
-    { id: 'booking',  label: '🛒 Book'        },
-    { id: 'local',    label: '💡 Local Tips'  },
+    { id: 'overview', label: '🗺️ Overview'  },
+    { id: 'days',     label: '📅 Day by Day' },
+    { id: 'map',      label: '📍 Map'        },
+    { id: 'booking',  label: '🛒 Book'       },
+    { id: 'local',    label: '💡 Local Tips' },
   ]
 
   const fmtDate = (iso) => {
@@ -992,7 +503,6 @@ export default function ItineraryModal({
                       const nextDay = Math.min(daysWithTransfer.length-1, activeDay+1)
                       setActiveDay(nextDay)
                       scrollTop()
-                      // Prompt feedback when reaching the last day for the first time
                       if (nextDay === daysWithTransfer.length-1 && onRequestFeedback) {
                         const hasPrompted = localStorage.getItem('sherpa_feedback_prompted')
                         if (!hasPrompted) {
@@ -1149,11 +659,11 @@ export default function ItineraryModal({
                 </div>
                 <div className="space-y-2">
                   {[
-                    { phrase: 'Hello',            key: 'hello' },
-                    { phrase: 'Please',           key: 'please' },
-                    { phrase: 'Thank you',        key: 'thankyou' },
-                    { phrase: 'Do you speak English?', key: 'english' },
-                    { phrase: 'The bill, please', key: 'bill' },
+                    { phrase: 'Hello'                },
+                    { phrase: 'Please'               },
+                    { phrase: 'Thank you'            },
+                    { phrase: 'Do you speak English?'},
+                    { phrase: 'The bill, please'     },
                   ].map(({ phrase }) => (
                     <div key={phrase} className="flex justify-between items-center py-1.5 border-b last:border-0"
                          style={{borderColor:'rgba(255,255,255,0.05)'}}>
@@ -1165,6 +675,7 @@ export default function ItineraryModal({
               </div>
             </div>
           )}
+
         </div>
       </div>
 
@@ -1191,6 +702,7 @@ export default function ItineraryModal({
           </button>
         )}
       </div>
+
     </div>
   )
 }
