@@ -56,8 +56,12 @@ export default function App() {
   const loadProfile = async (u, sendWelcome = false) => {
     const profile = await getProfile(u.id)
     if (!profile) {
-      // Only send welcome email on a fresh SIGNED_IN event AND after email is confirmed
-      if (sendWelcome && u.email_confirmed_at) {
+      // Guard: only ever send welcome email once per user, tracked in localStorage
+      const welcomeKey = `sherpa_welcomed_${u.id}`
+      const alreadySent = localStorage.getItem(welcomeKey)
+
+      if (sendWelcome && u.email_confirmed_at && !alreadySent) {
+        localStorage.setItem(welcomeKey, '1')
         api.welcomeEmail({ email: u.email, first_name: '' }).catch(() => {})
       }
       setShowProfile(true)
@@ -76,7 +80,7 @@ export default function App() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       const u = session?.user || null
       setUser(u)
-      // Only attempt welcome email on a genuine fresh sign-in, not page refresh
+      // Pass sendWelcome=true on SIGNED_IN — localStorage guard prevents duplicates
       if (u) loadProfile(u, _event === 'SIGNED_IN')
     })
 
